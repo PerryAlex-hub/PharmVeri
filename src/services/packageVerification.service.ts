@@ -54,7 +54,13 @@ async function runOCR(base64Image: string): Promise<OCRPackageDetails> {
       };
     }
 
-    const parsed = JSON.parse(detailsStr) as OCRPackageDetails;
+    // Strip markdown code fences if present (```json ... ```)
+    let cleanStr = detailsStr
+      .replace(/^```[\w]*\n?/, "")
+      .replace(/\n?```$/, "")
+      .trim();
+
+    const parsed = JSON.parse(cleanStr) as OCRPackageDetails;
     logger.debug(
       `OCR result: drug_name="${parsed.drug_name}", nafdac="${parsed.nafdac_reg_no}"`,
     );
