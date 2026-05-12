@@ -1,0 +1,35 @@
+{
+  "name": "pharmveri",
+  "version": "1.0.0",
+  "description": "AI-Powered Product Authentication and Verified Payment",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "authentication",
+    "counterfeit",
+    "verification",
+    "NAFDAC"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1",
+    "axios": "^1.6.0",
+    "firebase-admin": "^12.0.0",
+    "winston": "^3.11.0",
+    "sharp": "^0.33.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2",
+    "@types/node": "^20.10.5",
+    "@types/express": "^4.17.21",
+    "nodemon": "^3.0.2"
+  }
+}
