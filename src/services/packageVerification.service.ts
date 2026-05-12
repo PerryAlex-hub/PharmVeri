@@ -19,6 +19,8 @@ const WORKSPACE = "ifechukwu-nwokedi-s-workspace";
 const OCR_WORKFLOW_ID = "pharma-package-reader-gpt4o-1778548637743";
 const SIFT_WORKFLOW_ID = "pharma-sift-authenticity-verifier-1778509003924";
 const BASE_URL = "https://serverless.roboflow.com";
+const OCR_TIMEOUT_MS = 90000;
+const SIFT_TIMEOUT_MS = 90000;
 
 const supabase = createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY);
 
@@ -38,7 +40,7 @@ async function runOCR(base64Image: string): Promise<OCRPackageDetails> {
           openai_api_key: OPENAI_API_KEY,
         },
       },
-      { headers: { "Content-Type": "application/json" }, timeout: 30000 },
+      { headers: { "Content-Type": "application/json" }, timeout: OCR_TIMEOUT_MS },
     );
 
     const detailsStr = response.data.outputs?.[0]?.package_details;
@@ -203,7 +205,7 @@ async function runSIFT(
           query_image: { type: "base64", value: queryBase64 },
         },
       },
-      { headers: { "Content-Type": "application/json" }, timeout: 30000 },
+      { headers: { "Content-Type": "application/json" }, timeout: SIFT_TIMEOUT_MS },
     );
 
     const out = response.data.outputs?.[0];
