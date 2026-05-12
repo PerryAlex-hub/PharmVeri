@@ -6,7 +6,7 @@ import { scoringService } from "../services/scoring.service";
 import { barcodeAPIService } from "../services/barcodeAPI.service";
 import { barcodeScannerService } from "../services/barcodeScanner.service";
 import { nafdacScraperService } from "../services/nafdacScraper.service";
-import { fileToBase64 } from "../utils/imageProcessing";
+import { fileToBase64, urlToBase64 } from "../utils/imageProcessing";
 import {
   BarcodeVerificationData,
   NAFDACVerificationData,
@@ -19,7 +19,7 @@ export async function verifyProduct(
   try {
     logger.info("Starting product verification flow...");
 
-    const { imagePath, base64Image } = req.body;
+    const { imagePath, base64Image, imageUrl } = req.body;
 
     if (!imagePath && !base64Image) {
       logger.warn("No image provided for verification");
@@ -30,6 +30,14 @@ export async function verifyProduct(
     }
 
     let queryImageBase64: string | null = base64Image;
+
+    if (imageUrl && !base64Image && !imagePath) {
+      queryImageBase64 = await urlToBase64(imageUrl);
+      if (!queryImageBase64) {
+        res.status(400).json({ error: "Failed to fetch image from URL" });
+        return;
+      }
+    }
 
     if (imagePath && !base64Image) {
       queryImageBase64 = fileToBase64(imagePath);

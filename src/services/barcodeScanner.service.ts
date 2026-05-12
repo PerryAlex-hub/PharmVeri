@@ -1,5 +1,6 @@
 import Quagga from "@ericblade/quagga2";
 import { logger } from "../utils/logger";
+import { base64ToBuffer, detectImageFormat } from "../utils/imageProcessing";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -24,13 +25,41 @@ class BarcodeScannerService {
     try {
       logger.debug("Scanning barcode from image using @ericblade/quagga2...");
 
-      // Convert base64 to buffer
-      const imageBuffer = Buffer.from(base64Image, "base64");
+      // Convert base64 to buffer (handles data URIs and plain base64)
+      const imageBuffer = base64ToBuffer(base64Image);
+      if (!imageBuffer) {
+        logger.error("Failed to convert base64 to buffer");
+        return null;
+      }
 
-      // Create temporary file (Quagga2 requires file path)
-      // Use os.tmpdir() for cross-platform compatibility (handles Windows, Linux, macOS)
-      tempFilePath = path.join(os.tmpdir(), `barcode_${Date.now()}.png`);
+      // Detect image format from magic bytes
+      const imageFormat = detectImageFormat(imageBuffer);
+      if (!imageFormat) {
+        logger.error("Could not detect image format. Buffer may be corrupted.");
+        logger.debug(
+          `Buffer starts with: ${imageBuffer.slice(0, 8).toString("hex")}`,
+        );
+        return null;
+      }
+
+      logger.debug(`Detected image format: ${imageFormat}`);
+
+      // Map MIME type to file extension
+      const extensionMap: Record<string, string> = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "image/gif": "gif",
+      };
+      const ext = extensionMap[imageFormat] || "jpg";
+
+      // Create temporary file with correct extension (Quagga2 requires file path)
+      tempFilePath = path.join(os.tmpdir(), `barcode_${Date.now()}.${ext}`);
       fs.writeFileSync(tempFilePath, imageBuffer);
+
+      logger.debug(
+        `Created temp file: ${tempFilePath} (${imageBuffer.length} bytes)`,
+      );
 
       // Use Quagga2 to detect and decode barcode
       const result = await Quagga.decodeSingle(
@@ -71,7 +100,7 @@ class BarcodeScannerService {
       logger.debug("No barcode detected in image");
       return null;
     } catch (error) {
-      logger.debug(`Barcode scanning with Quagga2 failed: ${error}`);
+      logger.error(`Barcode scanning with Quagga2 failed: ${error}`);
       return null;
     } finally {
       // Clean up temporary file
