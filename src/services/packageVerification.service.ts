@@ -40,7 +40,10 @@ async function runOCR(base64Image: string): Promise<OCRPackageDetails> {
           openai_api_key: OPENAI_API_KEY,
         },
       },
-      { headers: { "Content-Type": "application/json" }, timeout: OCR_TIMEOUT_MS },
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: OCR_TIMEOUT_MS,
+      },
     );
 
     const detailsStr = response.data.outputs?.[0]?.package_details;
@@ -132,9 +135,7 @@ function mergeOCRResults(results: OCRPackageDetails[]): OCRPackageDetails {
   };
 
   const pickBest = (field: keyof OCRPackageDetails): string => {
-    const candidates = results
-      .map((r) => r[field])
-      .filter(isUsableValue);
+    const candidates = results.map((r) => r[field]).filter(isUsableValue);
 
     if (candidates.length === 0) return "";
 
@@ -193,40 +194,83 @@ async function runSIFT(
   referenceBase64: string,
   queryBase64: string,
 ): Promise<SIFTComparisonResult> {
-  try {
-    logger.debug("Running SIFT verifier...");
+  logger.debug("Running SIFT verifier...");
 
-    const response = await axios.post(
-      `${BASE_URL}/infer/workflows/${WORKSPACE}/${SIFT_WORKFLOW_ID}`,
-      {
-        api_key: ROBOFLOW_API_KEY,
-        inputs: {
-          reference_image: { type: "base64", value: referenceBase64 },
-          query_image: { type: "base64", value: queryBase64 },
+  const payload = {
+    api_key: ROBOFLOW_API_KEY,
+    inputs: {
+      reference_image: { type: "base64", value: referenceBase64 },
+      query_image: { type: "base64", value: queryBase64 },
+    },
+  };
+
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await axios.post(
+        `${BASE_URL}/infer/workflows/${WORKSPACE}/${SIFT_WORKFLOW_ID}`,
+        payload,
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: SIFT_TIMEOUT_MS,
         },
-      },
-      { headers: { "Content-Type": "application/json" }, timeout: SIFT_TIMEOUT_MS },
-    );
+      );
 
-    const out = response.data.outputs?.[0];
-    if (!out) {
-      logger.warn("SIFT returned empty output");
-      throw new Error("SIFT workflow returned empty output");
+      const out = response.data.outputs?.[0];
+      if (!out) {
+        logger.warn("SIFT returned empty output");
+        return {
+          match_verdict: false,
+          similarity_score: 0,
+          match_visualization: "",
+        };
+      }
+
+      logger.debug(
+        `SIFT result: verdict=${out.match_verdict}, score=${out.similarity_score}`,
+      );
+
+      return {
+        match_verdict: Boolean(out.match_verdict),
+        similarity_score: Number(out.similarity_score) || 0,
+        match_visualization: String(out.match_visualization || ""),
+      };
+    } catch (attemptError) {
+      const status = axios.isAxiosError(attemptError)
+        ? attemptError.response?.status
+        : undefined;
+      const body = axios.isAxiosError(attemptError)
+        ? attemptError.response?.data
+        : undefined;
+
+      logger.warn(
+        `SIFT attempt ${attempt}/${maxAttempts} failed${status ? ` with status ${status}` : ""}: ${attemptError}`,
+      );
+      if (body) {
+        logger.warn(`SIFT error response body: ${JSON.stringify(body)}`);
+      }
+
+      if (attempt < maxAttempts) {
+        const backoffMs = attempt * 2000;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
+      }
+
+      logger.error(`SIFT call failed after ${maxAttempts} attempts`);
+      return {
+        match_verdict: false,
+        similarity_score: 0,
+        match_visualization: "",
+      };
     }
-
-    logger.debug(
-      `SIFT result: verdict=${out.match_verdict}, score=${out.similarity_score}`,
-    );
-
-    return {
-      match_verdict: out.match_verdict as boolean,
-      similarity_score: out.similarity_score as number,
-      match_visualization: out.match_visualization as string,
-    };
-  } catch (error) {
-    logger.error(`SIFT call failed: ${error}`);
-    throw error;
   }
+
+  return {
+    match_verdict: false,
+    similarity_score: 0,
+    match_visualization: "",
+  };
 }
 
 /**
