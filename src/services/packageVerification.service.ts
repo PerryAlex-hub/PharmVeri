@@ -77,16 +77,25 @@ async function runOCR(base64Image: string): Promise<OCRPackageDetails> {
 function mergeOCRResults(results: OCRPackageDetails[]): OCRPackageDetails {
   logger.debug("Merging 4 OCR results...");
 
+  const isUsableValue = (value: unknown): value is string => {
+    if (typeof value !== "string") {
+      return false;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    return (
+      normalized !== "" &&
+      normalized !== "n/a" &&
+      normalized !== "not provided" &&
+      normalized !== "not available" &&
+      normalized !== "unknown"
+    );
+  };
+
   const pickBest = (field: keyof OCRPackageDetails): string => {
     const candidates = results
       .map((r) => r[field])
-      .filter(
-        (v) =>
-          v &&
-          typeof v === "string" &&
-          v.trim() !== "" &&
-          v.trim().toLowerCase() !== "n/a",
-      );
+      .filter(isUsableValue);
 
     if (candidates.length === 0) return "";
 
