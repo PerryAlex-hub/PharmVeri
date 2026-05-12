@@ -1,0 +1,8 @@
+{
+  "comments": "Mapping of NAFDAC numbers to their reference image filenames. Update this as you add new products.",
+  "references": {
+    "04-6969": "8906009234083.jpg",
+    "A4-100068": "image2.jpg",
+    "B4-6953": "image3.jpg"
+  }
+}
