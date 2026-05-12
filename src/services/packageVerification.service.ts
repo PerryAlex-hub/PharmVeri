@@ -1,6 +1,7 @@
 import axios from "axios";
 import { createClient } from "@supabase/supabase-js";
 import { logger } from "../utils/logger";
+import { config } from "../config/environment";
 import {
   PackageViews,
   OCRPackageDetails,
@@ -13,15 +14,13 @@ import {
 // --- Config ---
 const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY!;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
 
 const WORKSPACE = "ifechukwu-nwokedi-s-workspace";
 const OCR_WORKFLOW_ID = "pharma-package-reader-gpt4o-1778548637743";
 const SIFT_WORKFLOW_ID = "pharma-sift-authenticity-verifier-1778509003924";
 const BASE_URL = "https://serverless.roboflow.com";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+const supabase = createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY);
 
 /**
  * Run OCR on a single image using Roboflow Pharma Package Reader workflow
