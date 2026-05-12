@@ -92,6 +92,43 @@ function mergeOCRResults(results: OCRPackageDetails[]): OCRPackageDetails {
     );
   };
 
+  const normalizeNafdac = (value: string): string => {
+    const trimmed = value.trim();
+    const compact = trimmed.replace(/\s*[-]\s*/g, "-");
+    return compact.replace(/\s+/g, " ");
+  };
+
+  const extractNafdacNumber = (value: unknown): string | null => {
+    if (!isUsableValue(value)) {
+      return null;
+    }
+
+    const normalized = normalizeNafdac(value);
+
+    const exactMatch = normalized.match(/\b\d{2}-\d{4}\b/);
+    if (exactMatch?.[0]) {
+      return exactMatch[0];
+    }
+
+    const spacedMatch = normalized.match(/\b\d{2}\s*-\s*\d{4}\b/);
+    if (spacedMatch?.[0]) {
+      return normalizeNafdac(spacedMatch[0]);
+    }
+
+    return null;
+  };
+
+  const pickNafdac = (): string => {
+    for (const result of results) {
+      const candidate = extractNafdacNumber(result.nafdac_reg_no);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    return "";
+  };
+
   const pickBest = (field: keyof OCRPackageDetails): string => {
     const candidates = results
       .map((r) => r[field])
@@ -104,7 +141,7 @@ function mergeOCRResults(results: OCRPackageDetails[]): OCRPackageDetails {
 
   const merged: OCRPackageDetails = {
     drug_name: pickBest("drug_name"),
-    nafdac_reg_no: pickBest("nafdac_reg_no"),
+    nafdac_reg_no: pickNafdac(),
     batch_number: pickBest("batch_number"),
     expiry_date: pickBest("expiry_date"),
     manufacturer: pickBest("manufacturer"),
