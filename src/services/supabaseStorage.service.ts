@@ -186,6 +186,70 @@ class SupabaseStorageService {
       return false;
     }
   }
+
+  /**
+   * Download reference image from reference-images bucket (4-view verification)
+   * Naming convention: {nafdac_reg_no}_{position}.jpg
+   * e.g., 04-6969_front.jpg, 04-6969_back.jpg, etc.
+   */
+  async downloadDrugReference(
+    nafdacNumber: string,
+    position: string,
+  ): Promise<Buffer | null> {
+    try {
+      const fileName = `${nafdacNumber}_${position}.jpg`;
+      const bucketName = "reference-images";
+
+      logger.debug(`Downloading from reference-images: ${fileName}`);
+
+      const { data, error } = await this.client.storage
+        .from(bucketName)
+        .download(fileName);
+
+      if (error || !data) {
+        logger.error(
+          `Failed to download ${fileName}: ${error?.message || "unknown error"}`,
+        );
+        return null;
+      }
+
+      // Convert returned data to Buffer
+      const anyData: any = data;
+      if (Buffer.isBuffer(anyData)) {
+        return anyData as Buffer;
+      }
+
+      if (typeof anyData.arrayBuffer === "function") {
+        const ab = await anyData.arrayBuffer();
+        return Buffer.from(ab);
+      }
+
+      // Handle Node.js Readable stream
+      if (
+        anyData instanceof Object &&
+        typeof anyData.getReader !== "function" &&
+        typeof anyData.pipe === "function"
+      ) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of anyData as AsyncIterable<Uint8Array>) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return Buffer.concat(chunks);
+      }
+
+      // Fallback: try text
+      try {
+        const text = await anyData.text();
+        return Buffer.from(text);
+      } catch (e) {
+        logger.error(`Unable to convert downloaded data to Buffer: ${e}`);
+        return null;
+      }
+    } catch (err) {
+      logger.error(`Storage download error: ${err}`);
+      return null;
+    }
+  }
 }
 
 export const supabaseStorageService = new SupabaseStorageService();
