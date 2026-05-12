@@ -6,7 +6,7 @@ services:
     plan: free # Change to starter/standard for production
 
     # Build configuration
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
 
     # Environment variables (must be set in Render dashboard)
