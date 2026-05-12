@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: pharmveri-api
+    env: node
+    region: ohio # or choose your preferred region
+    plan: free # Change to starter/standard for production
+
+    # Build configuration
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+
+    # Environment variables (must be set in Render dashboard)
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: LOG_LEVEL
+        value: info
+
+    # Health check (optional but recommended)
+    healthCheckPath: /
+
+    # Disk configuration
+    disk:
+      name: logs
+      mountPath: /logs
+      sizeGB: 1 # For storing logs; adjust as needed
+
+    # Auto-deploy on git push
+    autoDeploy: true
+
+    # Build cache (speeds up subsequent deployments)
+    buildCache: npm

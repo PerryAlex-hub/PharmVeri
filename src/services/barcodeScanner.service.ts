@@ -2,6 +2,7 @@ import Quagga from "@ericblade/quagga2";
 import { logger } from "../utils/logger";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 
 export interface DetectedBarcode {
   code: string;
@@ -27,7 +28,8 @@ class BarcodeScannerService {
       const imageBuffer = Buffer.from(base64Image, "base64");
 
       // Create temporary file (Quagga2 requires file path)
-      tempFilePath = path.join("/tmp", `barcode_${Date.now()}.png`);
+      // Use os.tmpdir() for cross-platform compatibility (handles Windows, Linux, macOS)
+      tempFilePath = path.join(os.tmpdir(), `barcode_${Date.now()}.png`);
       fs.writeFileSync(tempFilePath, imageBuffer);
 
       // Use Quagga2 to detect and decode barcode

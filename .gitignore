@@ -1,9 +1,9 @@
 node_modules/
 python/venv/
 dist/
+logs/
 .env
 .env.local
-.env.example
 .env.*.local
 *.log
 .DS_Store
@@ -16,3 +16,4 @@ dist/
 .env.production
 firebase-key.json
 *.pem
+tmp/

@@ -1,10 +1,20 @@
 import express from "express";
+import cors from "cors";
 import testRouter from "./routes/test.routes";
 import verificationRouter from "./routes/verification.routes";
 import { logger } from "./utils/logger";
 import { config } from "./config/environment";
 
 const app = express();
+
+app.use(
+  cors({
+    origin: "*", 
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
+  }),
+);
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
