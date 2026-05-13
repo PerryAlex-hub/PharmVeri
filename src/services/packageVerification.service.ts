@@ -9,8 +9,10 @@ import {
   VerificationResponse,
   PanelMatch,
   SIFTComparisonResult,
+  GeminiVisionAnalysis,
 } from "../types/verification.types";
 import { scoringService } from "./scoring.service";
+import { geminiVisionService } from "./geminiVision.service";
 
 // --- Config ---
 const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY!;
@@ -38,13 +40,15 @@ function isUsableText(value: unknown): value is string {
   }
 
   const normalized = value.trim().toLowerCase();
+  const isNotVisiblePlaceholder = normalized.startsWith("not visible");
   return (
     normalized !== "" &&
     normalized !== "unknown" &&
     normalized !== "not provided" &&
     normalized !== "not specified" &&
     normalized !== "not available" &&
-    normalized !== "n/a"
+    normalized !== "n/a" &&
+    !isNotVisiblePlaceholder
   );
 }
 
@@ -144,7 +148,9 @@ function parseExpiryDate(expiryDate: string): Date | null {
     }
   }
 
-  const delimiterMatch = normalized.match(/^([0-9]{1,4})[\/-]([0-9]{1,4})$/);
+  const delimiterMatch = normalized.match(
+    /^([0-9]{1,4})[\s\/\-.]([0-9]{1,4})$/,
+  );
   if (!delimiterMatch) {
     return null;
   }
@@ -157,10 +163,22 @@ function parseExpiryDate(expiryDate: string): Date | null {
   }
 
   if (delimiterMatch[1].length === 4) {
+    if (second < 1 || second > 12) {
+      return null;
+    }
     return new Date(first, second, 0);
   }
 
-  return new Date(second, first, 0);
+  if (first < 1 || first > 12) {
+    return null;
+  }
+
+  const year = delimiterMatch[2].length === 2 ? 2000 + second : second;
+  if (!Number.isFinite(year) || year < 2000 || year > 2100) {
+    return null;
+  }
+
+  return new Date(year, first, 0);
 }
 
 /**
@@ -689,16 +707,33 @@ export async function verifyDrugPackage(
       : `Failed views: ${failedViews}.`;
 
     logger.info(
-      `Verification complete: authentic=${allPassed}, confidence=${lowestScore}, band=${confidenceBand}, expiry=${expiryAnalysis.expiry_date || "none"}, expired=${String(expiryAnalysis.is_expired)}`,
+      `Verification complete: authentic=${allPassed}, sift_confidence=${lowestScore}, scoring_confidence=${confPercent}, band=${confidenceBand}, expiry=${expiryAnalysis.expiry_date || "none"}, expired=${String(expiryAnalysis.is_expired)}`,
     );
 
-    return {
+    // STEP 9: Optional Gemini Vision Analysis for semantic verification
+    let geminiVisionAnalysis: GeminiVisionAnalysis | null | undefined;
+    if (geminiVisionService.isEnabled()) {
+      try {
+        logger.debug("Step 9: Running Gemini vision analysis on front image");
+        geminiVisionAnalysis = await geminiVisionService.analyzeProductImages(
+          refFront,
+          views.front,
+        );
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        logger.warn(`Gemini vision analysis failed: ${errorMsg}`);
+      }
+    }
+
+    const responseBody: VerificationResponse = {
       authentic: allPassed,
       drug_name: frontOCR.drug_name || "Unknown",
       nafdac_number: nafdacNumber,
-      overall_confidence: lowestScore,
+      sift_confidence: lowestScore,
+      scoring_confidence: confPercent,
       confidence_band: confidenceBand,
       expiry_analysis: expiryAnalysis,
+      ...(geminiVisionAnalysis && { gemini_vision_analysis: geminiVisionAnalysis }),
       verdict_reason: verdictReason,
       per_view_analysis: perViewAnalysis,
       merged_ocr_data: mergedOCR,
@@ -713,6 +748,8 @@ export async function verifyDrugPackage(
         },
       },
     };
+
+    return responseBody;
   } catch (error) {
     logger.error(`Package verification failed: ${error}`);
     throw error;

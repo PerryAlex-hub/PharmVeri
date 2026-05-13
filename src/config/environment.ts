@@ -15,6 +15,7 @@ export interface EnvironmentConfig {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   LOG_LEVEL: string;
+  GEMINI_API_KEY?: string;
 }
 
 function validateEnv(): EnvironmentConfig {
@@ -53,6 +54,7 @@ function validateEnv(): EnvironmentConfig {
     SUPABASE_URL: process.env.SUPABASE_URL!,
     SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY!,
     LOG_LEVEL: process.env.LOG_LEVEL || "debug",
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   };
 }
 

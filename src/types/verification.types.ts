@@ -121,13 +121,21 @@ export interface ExpiryAnalysis {
   note: string;
 }
 
+export interface GeminiVisionAnalysis {
+  is_authentic: boolean;
+  confidence_score: number; // 0.0 to 1.0
+  reasoning_details: string;
+}
+
 export interface VerificationResponse {
   authentic: boolean;
   drug_name: string;
   nafdac_number: string;
-  overall_confidence: number;
+  sift_confidence: number;
+  scoring_confidence: number;
   confidence_band: "very_high" | "high" | "moderate" | "low";
   expiry_analysis: ExpiryAnalysis;
+  gemini_vision_analysis?: GeminiVisionAnalysis;
   verdict_reason: string;
   per_view_analysis: ViewAnalysis[];
   merged_ocr_data: OCRPackageDetails;
