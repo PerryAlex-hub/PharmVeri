@@ -143,7 +143,12 @@ export interface DetailedAnalysisResult {
 }
 
 export interface FinalVerdict {
-  conclusion: "AUTHENTIC" | "LIKELY_AUTHENTIC" | "INCONCLUSIVE" | "LIKELY_COUNTERFEIT" | "COUNTERFEIT";
+  conclusion:
+    | "AUTHENTIC"
+    | "LIKELY_AUTHENTIC"
+    | "INCONCLUSIVE"
+    | "LIKELY_COUNTERFEIT"
+    | "COUNTERFEIT";
   confidence_percentage: number; // 0-100
   reason: string; // Short explanation of the conclusion
 }
