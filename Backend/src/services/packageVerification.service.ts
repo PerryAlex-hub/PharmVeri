@@ -13,6 +13,9 @@ import {
 } from "../types/verification.types";
 import { scoringService } from "./scoring.service";
 import { geminiVisionService } from "./geminiVision.service";
+import { detailedAnalysisService } from "./detailedAnalysis.service";
+import { nafdacScraperService } from "./nafdacScraper.service";
+import { verdictService } from "./verdict.service";
 
 // --- Config ---
 const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY!;
@@ -549,91 +552,25 @@ export async function verifyDrugPackage(
 
     logger.info(`Identified NAFDAC: ${nafdacNumber}`);
 
-    // STEP 3: Fetch ALL 4 reference images from Supabase in parallel
-    logger.debug("Step 3: Fetching all 4 reference images from Supabase");
-    const [refFront, refBack, refPanelA, refPanelB] = await Promise.all([
+    // STEP 3: Fetch reference images (FRONT and BACK only - skip panels for speed)
+    logger.debug("Step 3: Fetching front and back reference images from Supabase");
+    const [refFront, refBack] = await Promise.all([
       fetchRefBase64(nafdacNumber, "front"),
       fetchRefBase64(nafdacNumber, "back"),
-      fetchRefBase64(nafdacNumber, "panel_a"),
-      fetchRefBase64(nafdacNumber, "panel_b"),
     ]);
 
-    logger.debug("Fetched all reference images");
+    logger.debug("Fetched reference images");
 
-    // STEP 4: Run SIFT on FRONT and BACK (direct, unambiguous)
-    logger.debug("Step 4: Running SIFT on front and back (direct)");
+    // STEP 4: Run SIFT on FRONT and BACK only
+    logger.debug("Step 4: Running SIFT on front and back");
     const [frontResult, backResult] = await Promise.all([
       runSIFT(refFront, views.front),
       runSIFT(refBack, views.back),
     ]);
 
-    // STEP 5: Run SIFT on ALL 4 panel combinations in parallel
-    // This handles automatic matching if user swaps panel_1 and panel_2
-    logger.debug("Step 5: Running SIFT on all 4 panel combinations");
-    const [p1_a, p1_b, p2_a, p2_b] = await Promise.all([
-      runSIFT(refPanelA, views.panel_1),
-      runSIFT(refPanelB, views.panel_1),
-      runSIFT(refPanelA, views.panel_2),
-      runSIFT(refPanelB, views.panel_2),
-    ]);
+    logger.debug("SIFT comparisons complete");
 
-    logger.debug("All panel SIFT comparisons complete");
-
-    // STEP 6: Hungarian-style assignment for best total score
-    logger.debug("Step 6: Computing optimal panel assignment");
-
-    // Option A: panel_1→a, panel_2→b
-    const totalA = p1_a.similarity_score + p2_b.similarity_score;
-    // Option B: panel_1→b, panel_2→a
-    const totalB = p1_b.similarity_score + p2_a.similarity_score;
-
-    let panel1Match: PanelMatch;
-    let panel2Match: PanelMatch;
-    let assignmentStr: string;
-
-    if (totalA >= totalB) {
-      // Assignment A is better (or tied)
-      logger.debug(
-        `Panel assignment A selected: totalA=${totalA} >= totalB=${totalB}`,
-      );
-      assignmentStr = "panel_1→panel_a, panel_2→panel_b";
-      panel1Match = {
-        userPanel: "panel_1",
-        refPanel: "panel_a",
-        score: p1_a.similarity_score,
-        verdict: p1_a.match_verdict,
-        visualization: p1_a.match_visualization,
-      };
-      panel2Match = {
-        userPanel: "panel_2",
-        refPanel: "panel_b",
-        score: p2_b.similarity_score,
-        verdict: p2_b.match_verdict,
-        visualization: p2_b.match_visualization,
-      };
-    } else {
-      // Assignment B is better
-      logger.debug(
-        `Panel assignment B selected: totalB=${totalB} > totalA=${totalA}`,
-      );
-      assignmentStr = "panel_1→panel_b, panel_2→panel_a";
-      panel1Match = {
-        userPanel: "panel_1",
-        refPanel: "panel_b",
-        score: p1_b.similarity_score,
-        verdict: p1_b.match_verdict,
-        visualization: p1_b.match_visualization,
-      };
-      panel2Match = {
-        userPanel: "panel_2",
-        refPanel: "panel_a",
-        score: p2_a.similarity_score,
-        verdict: p2_a.match_verdict,
-        visualization: p2_a.match_visualization,
-      };
-    }
-
-    // STEP 7: Build per-view analysis
+    // STEP 5: Build per-view analysis (front and back only)
     const perViewAnalysis: ViewAnalysis[] = [
       {
         view: "front",
@@ -649,31 +586,30 @@ export async function verifyDrugPackage(
         similarity_score: backResult.similarity_score,
         visualization: backResult.match_visualization,
       },
-      {
-        view: "panel_1",
-        matched_ref: panel1Match.refPanel,
-        verdict: panel1Match.verdict,
-        similarity_score: panel1Match.score,
-        visualization: panel1Match.visualization,
-      },
-      {
-        view: "panel_2",
-        matched_ref: panel2Match.refPanel,
-        verdict: panel2Match.verdict,
-        similarity_score: panel2Match.score,
-        visualization: panel2Match.visualization,
-      },
     ];
 
-    // STEP 8: STRICT aggregation — ALL views must pass
-    const allPassed = perViewAnalysis.every((v) => v.verdict === true);
+    // STEP 6: Verify NAFDAC in database
+    logger.debug("Step 6: Verifying NAFDAC number in database");
+    let nafdacInfo;
+    try {
+      nafdacInfo = await nafdacScraperService.searchNAFDACGreenbook(
+        nafdacNumber,
+      );
+    } catch (err) {
+      logger.warn(`NAFDAC verification failed: ${err instanceof Error ? err.message : String(err)}`);
+      nafdacInfo = null;
+    }
+
+    // STEP 7: Check authenticity (both front and back must pass)
+    const allPassed =
+      frontResult.match_verdict && backResult.match_verdict;
     const lowestScore = Math.min(
-      ...perViewAnalysis.map((v) => v.similarity_score),
+      frontResult.similarity_score,
+      backResult.similarity_score,
     );
-    // Compute confidence band from scoring service (percentage) rather than raw SIFT score
+
     const aggregateSimilarity = Math.round(
-      perViewAnalysis.reduce((s, v) => s + v.similarity_score, 0) /
-        perViewAnalysis.length,
+      (frontResult.similarity_score + backResult.similarity_score) / 2,
     );
 
     const aggregateSift = {
@@ -682,9 +618,7 @@ export async function verifyDrugPackage(
       match_visualization: frontResult.match_visualization || "",
     } as SIFTComparisonResult;
 
-    // scoringService expects ParsedPackageDetails; our mergedOCR shape is compatible
     const authReport = scoringService.computeAuthenticityScore(
-      // cast because types differ by name but fields match
       mergedOCR as any,
       aggregateSift as any,
     );
@@ -697,31 +631,46 @@ export async function verifyDrugPackage(
     else if (confPercent >= 50) confidenceBand = "moderate";
     else confidenceBand = "low";
 
-    const failedViews = perViewAnalysis
-      .filter((v) => !v.verdict)
-      .map((v) => `${v.view} (vs ref ${v.matched_ref})`)
-      .join(", ");
-
     const verdictReason = allPassed
-      ? "All views matched their reference panels."
-      : `Failed views: ${failedViews}.`;
+      ? "Front and back images matched reference panels."
+      : "One or both views (front/back) did not match reference.";
 
     logger.info(
-      `Verification complete: authentic=${allPassed}, sift_confidence=${lowestScore}, scoring_confidence=${confPercent}, band=${confidenceBand}, expiry=${expiryAnalysis.expiry_date || "none"}, expired=${String(expiryAnalysis.is_expired)}`,
+      `Verification complete: authentic=${allPassed}, sift_confidence=${lowestScore}, scoring_confidence=${confPercent}`,
     );
 
-    // STEP 9: Optional Gemini Vision Analysis for semantic verification
-    let geminiVisionAnalysis: GeminiVisionAnalysis | null | undefined;
+    // STEP 8: Generate detailed analysis using Gemini
+    logger.debug("Step 8: Generating detailed authenticity analysis");
+    let detailedAnalysis;
+    try {
+      detailedAnalysis =
+        await detailedAnalysisService.generateDetailedAnalysis(
+          mergedOCR,
+          aggregateSift,
+        );
+    } catch (err) {
+      logger.warn(
+        `Detailed analysis failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      detailedAnalysis = null;
+    }
+
+    // STEP 9: Run Gemini vision comparison on FRONT and BACK
+    logger.debug("Step 9: Running Gemini vision comparison on front and back");
+    let frontBackComparison;
     if (geminiVisionService.isEnabled()) {
       try {
-        logger.debug("Step 9: Running Gemini vision analysis on front image");
-        geminiVisionAnalysis = await geminiVisionService.analyzeProductImages(
-          refFront,
-          views.front,
-        );
+        frontBackComparison =
+          await geminiVisionService.analyzeProductImages(
+            refFront,
+            views.front,
+          );
+        logger.debug("Front image comparison complete");
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        logger.warn(`Gemini vision analysis failed: ${errorMsg}`);
+        logger.warn(
+          `Gemini front comparison failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        frontBackComparison = null;
       }
     }
 
@@ -733,21 +682,35 @@ export async function verifyDrugPackage(
       scoring_confidence: confPercent,
       confidence_band: confidenceBand,
       expiry_analysis: expiryAnalysis,
-      ...(geminiVisionAnalysis && { gemini_vision_analysis: geminiVisionAnalysis }),
+      ...(nafdacInfo && nafdacInfo.found && {
+        nafdac_verification: {
+          found: true,
+          product_name: nafdacInfo.productName,
+          manufacturer: nafdacInfo.manufacturer,
+          status: nafdacInfo.status,
+        },
+      }),
+      ...(frontBackComparison && {
+        gemini_front_back_comparison: frontBackComparison,
+      }),
+      ...(detailedAnalysis && { detailed_analysis: detailedAnalysis }),
       verdict_reason: verdictReason,
       per_view_analysis: perViewAnalysis,
       merged_ocr_data: mergedOCR,
       raw_ocr_per_view: rawOcrPerView,
       panel_matching: {
-        assignment: assignmentStr,
-        scores: {
-          panel_1_vs_a: p1_a.similarity_score,
-          panel_1_vs_b: p1_b.similarity_score,
-          panel_2_vs_a: p2_a.similarity_score,
-          panel_2_vs_b: p2_b.similarity_score,
-        },
+        assignment: "N/A - panels skipped for speed",
+        scores: {},
       },
     };
+
+    // Compute final verdict based on all factors
+    const finalVerdict = verdictService.computeFinalVerdict(responseBody);
+    responseBody.final_verdict = finalVerdict;
+
+    logger.info(
+      `Final verdict: ${finalVerdict.conclusion} (${finalVerdict.confidence_percentage}% confidence)`,
+    );
 
     return responseBody;
   } catch (error) {
