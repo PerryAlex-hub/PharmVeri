@@ -45,7 +45,7 @@ class NAFDACScraperService {
           params: {
             nrn: nafdacNumber,
           },
-          timeout: 25000,
+          timeout: 60000,
         },
       );
 

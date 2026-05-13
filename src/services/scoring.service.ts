@@ -167,16 +167,81 @@ class ScoringService {
     return report;
   }
 
+  private normalizeExpiryDate(expiryDate: string): string {
+    return expiryDate.trim().replace(/\s+/g, " ");
+  }
+
+  private parseExpiryDate(expiryDate: string): Date | null {
+    const normalized = this.normalizeExpiryDate(expiryDate).toLowerCase();
+
+    const monthNames = [
+      "jan",
+      "feb",
+      "mar",
+      "apr",
+      "may",
+      "jun",
+      "jul",
+      "aug",
+      "sep",
+      "oct",
+      "nov",
+      "dec",
+    ];
+
+    const monthNameMatch = normalized.match(
+      /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s+(\d{4})$/,
+    );
+    if (monthNameMatch) {
+      const monthIndex = monthNames.indexOf(monthNameMatch[1]);
+      const year = parseInt(monthNameMatch[2], 10);
+      if (monthIndex >= 0 && Number.isFinite(year)) {
+        return new Date(year, monthIndex + 1, 0);
+      }
+    }
+
+    const delimiterMatch = normalized.match(/^([0-9]{1,4})[\/-]([0-9]{1,4})$/);
+    if (!delimiterMatch) {
+      return null;
+    }
+
+    const first = parseInt(delimiterMatch[1], 10);
+    const second = parseInt(delimiterMatch[2], 10);
+
+    if (!Number.isFinite(first) || !Number.isFinite(second)) {
+      return null;
+    }
+
+    if (delimiterMatch[1].length === 4) {
+      return new Date(first, second, 0);
+    }
+
+    return new Date(second, first, 0);
+  }
+
+  private isExpiryPlaceholder(expiryDate: string): boolean {
+    const normalized = this.normalizeExpiryDate(expiryDate).toLowerCase();
+    return [
+      "not visible in the image",
+      "not provided",
+      "not specified",
+      "not available",
+      "unknown",
+      "n/a",
+    ].includes(normalized);
+  }
+
   private isExpired(expiryDate: string | undefined): boolean {
-    if (!expiryDate || expiryDate === "Not visible in the image") {
+    if (!expiryDate || this.isExpiryPlaceholder(expiryDate)) {
       return false;
     }
 
     try {
-      const [month, year] = expiryDate.split("/").map((x) => x.trim());
-      if (!month || !year) return false;
+      const expiry = this.parseExpiryDate(expiryDate);
+      if (!expiry) {
+        return false;
+      }
 
-      const expiry = new Date(parseInt(year), parseInt(month), 0);
       const today = new Date();
 
       return expiry < today;
@@ -187,12 +252,20 @@ class ScoringService {
   }
 
   private hasValidExpiry(expiryDate: string | undefined): boolean {
-    // Only returns true if expiry date was detected AND not expired
-    if (!expiryDate || expiryDate === "Not visible in the image") {
-      return false; // Not detected - score not applicable
+    if (!expiryDate) {
+      return false;
     }
 
-    return !this.isExpired(expiryDate); // True only if detected and not expired
+    if (this.isExpiryPlaceholder(expiryDate)) {
+      return false;
+    }
+
+    const parsed = this.parseExpiryDate(expiryDate);
+    if (!parsed) {
+      return false;
+    }
+
+    return !this.isExpired(expiryDate);
   }
 
   private getVerdict(score: number): "GENUINE" | "SUSPICIOUS" | "COUNTERFEIT" {

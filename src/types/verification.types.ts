@@ -114,11 +114,20 @@ export interface PanelMatchingDetails {
   scores: Record<string, number>;
 }
 
+export interface ExpiryAnalysis {
+  detected: boolean;
+  expiry_date: string | null;
+  is_expired: boolean | null;
+  note: string;
+}
+
 export interface VerificationResponse {
   authentic: boolean;
   drug_name: string;
   nafdac_number: string;
   overall_confidence: number;
+  confidence_band: "very_high" | "high" | "moderate" | "low";
+  expiry_analysis: ExpiryAnalysis;
   verdict_reason: string;
   per_view_analysis: ViewAnalysis[];
   merged_ocr_data: OCRPackageDetails;

@@ -10,6 +10,7 @@ import {
   PanelMatch,
   SIFTComparisonResult,
 } from "../types/verification.types";
+import { scoringService } from "./scoring.service";
 
 // --- Config ---
 const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY!;
@@ -24,12 +25,153 @@ const SIFT_TIMEOUT_MS = 90000;
 
 const supabase = createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY);
 
+function stripMarkdownCodeFences(value: string): string {
+  return value
+    .replace(/^```[\w-]*\n?/, "")
+    .replace(/\n?```$/, "")
+    .trim();
+}
+
+function isUsableText(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized !== "" &&
+    normalized !== "unknown" &&
+    normalized !== "not provided" &&
+    normalized !== "not specified" &&
+    normalized !== "not available" &&
+    normalized !== "n/a"
+  );
+}
+
+function normalizeExpiryCandidate(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function extractExpiryDate(text: string): string {
+  const normalizedText = text.replace(/\s+/g, " ");
+  const patterns = [
+    /\b(?:exp(?:iry)?|exp\.?\s*date)\b[:\s-]*([0-9]{1,2}[\s/-][0-9]{2,4})\b/i,
+    /\b(?:exp(?:iry)?|exp\.?\s*date)\b[:\s-]*([0-9]{4}[\s/-][0-9]{1,2})\b/i,
+    /\b(?:exp(?:iry)?|exp\.?\s*date)\b[:\s-]*([A-Za-z]{3,9}\.??\s+[0-9]{4})\b/i,
+    /\b([0-9]{1,2}[\s/-][0-9]{2,4})\b(?=\s*(?:exp(?:iry)?|exp\.?\s*date)\b)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalizedText.match(pattern);
+    if (match?.[1]) {
+      return normalizeExpiryCandidate(match[1]);
+    }
+  }
+
+  const loosePatterns = [
+    /\b[0-9]{1,2}\/[0-9]{2,4}\b/g,
+    /\b[0-9]{4}\/[0-9]{1,2}\b/g,
+    /\b[0-9]{1,2}-[0-9]{2,4}\b/g,
+    /\b[A-Za-z]{3,9}\.??\s+[0-9]{4}\b/g,
+  ];
+
+  for (const pattern of loosePatterns) {
+    const match = normalizedText.match(pattern);
+    if (match?.[0]) {
+      return normalizeExpiryCandidate(match[0]);
+    }
+  }
+
+  return "";
+}
+
+function extractNafdacNumber(text: string): string {
+  const normalizedText = text.replace(/\s+/g, " ");
+  const labeledMatch = normalizedText.match(
+    /\b(?:nafdac(?:\s+reg(?:istration)?\.?\s*no\.?|\.?\s*reg\.?\s*no\.?)?)\b[:\s-]*([A-Z0-9][A-Z0-9\s-]{3,})/i,
+  );
+
+  const candidate =
+    labeledMatch?.[1] ??
+    normalizedText.match(/\b[A-Z0-9]{1,3}\s*-\s*[A-Z0-9]{2,6}\b/i)?.[0] ??
+    "";
+  if (!candidate) {
+    return "";
+  }
+
+  return candidate
+    .replace(/\s*[-]\s*/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pickFirstUsable(values: Array<unknown>): string {
+  for (const value of values) {
+    if (isUsableText(value)) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function parseExpiryDate(expiryDate: string): Date | null {
+  const normalized = expiryDate.trim().replace(/\s+/g, " ").toLowerCase();
+
+  const monthNames = [
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "may",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "oct",
+    "nov",
+    "dec",
+  ];
+
+  const monthNameMatch = normalized.match(
+    /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s+(\d{4})$/,
+  );
+  if (monthNameMatch) {
+    const monthIndex = monthNames.indexOf(monthNameMatch[1]);
+    const year = parseInt(monthNameMatch[2], 10);
+    if (monthIndex >= 0 && Number.isFinite(year)) {
+      return new Date(year, monthIndex + 1, 0);
+    }
+  }
+
+  const delimiterMatch = normalized.match(/^([0-9]{1,4})[\/-]([0-9]{1,4})$/);
+  if (!delimiterMatch) {
+    return null;
+  }
+
+  const first = parseInt(delimiterMatch[1], 10);
+  const second = parseInt(delimiterMatch[2], 10);
+
+  if (!Number.isFinite(first) || !Number.isFinite(second)) {
+    return null;
+  }
+
+  if (delimiterMatch[1].length === 4) {
+    return new Date(first, second, 0);
+  }
+
+  return new Date(second, first, 0);
+}
+
 /**
  * Run OCR on a single image using Roboflow Pharma Package Reader workflow
  */
-async function runOCR(base64Image: string): Promise<OCRPackageDetails> {
+async function runOCR(
+  base64Image: string,
+  viewName: keyof PackageViews,
+): Promise<OCRPackageDetails> {
   try {
-    logger.debug("Running OCR on image...");
+    logger.debug(`Running OCR on ${viewName} image...`);
 
     const response = await axios.post(
       `${BASE_URL}/infer/workflows/${WORKSPACE}/${OCR_WORKFLOW_ID}`,
@@ -46,9 +188,12 @@ async function runOCR(base64Image: string): Promise<OCRPackageDetails> {
       },
     );
 
-    const detailsStr = response.data.outputs?.[0]?.package_details;
-    if (!detailsStr) {
-      logger.warn("OCR returned no package_details");
+    const output = response.data.outputs?.[0] as
+      | Record<string, unknown>
+      | undefined;
+
+    if (!output) {
+      logger.warn(`OCR returned no output for ${viewName}`);
       return {
         drug_name: "",
         nafdac_reg_no: "",
@@ -59,19 +204,55 @@ async function runOCR(base64Image: string): Promise<OCRPackageDetails> {
       };
     }
 
-    // Strip markdown code fences if present (```json ... ```)
-    let cleanStr = detailsStr
-      .replace(/^```[\w]*\n?/, "")
-      .replace(/\n?```$/, "")
-      .trim();
+    const extractedText = pickFirstUsable([
+      output.extracted_text,
+      output.text,
+      output.raw_text,
+    ]);
+    const packageDetails = pickFirstUsable([output.package_details]);
 
+    if (extractedText) {
+      logger.debug(`OCR extracted text for ${viewName}:\n${extractedText}`);
+    } else {
+      logger.debug(`OCR extracted text for ${viewName}: <none>`);
+    }
+
+    if (packageDetails) {
+      logger.debug(`OCR package_details for ${viewName}: ${packageDetails}`);
+    } else {
+      logger.warn(`OCR returned no package_details for ${viewName}`);
+    }
+
+    if (!packageDetails) {
+      return {
+        drug_name: "",
+        nafdac_reg_no: extractNafdacNumber(extractedText),
+        batch_number: "",
+        expiry_date: extractExpiryDate(extractedText),
+        manufacturer: "",
+        barcode: "",
+      };
+    }
+
+    const cleanStr = stripMarkdownCodeFences(packageDetails);
     const parsed = JSON.parse(cleanStr) as OCRPackageDetails;
+    const fallbackExpiry = extractExpiryDate(extractedText);
+    const fallbackNafdac = extractNafdacNumber(extractedText);
+
+    if (!isUsableText(parsed.expiry_date) && fallbackExpiry) {
+      parsed.expiry_date = fallbackExpiry;
+    }
+
+    if (!isUsableText(parsed.nafdac_reg_no) && fallbackNafdac) {
+      parsed.nafdac_reg_no = fallbackNafdac;
+    }
+
     logger.debug(
-      `OCR result: drug_name="${parsed.drug_name}", nafdac="${parsed.nafdac_reg_no}"`,
+      `OCR result for ${viewName}: drug_name="${parsed.drug_name}", nafdac="${parsed.nafdac_reg_no}", expiry="${parsed.expiry_date}"`,
     );
     return parsed;
   } catch (error) {
-    logger.error(`OCR call failed: ${error}`);
+    logger.error(`OCR call failed for ${viewName}: ${error}`);
     throw error;
   }
 }
@@ -294,10 +475,10 @@ export async function verifyDrugPackage(
     // STEP 1: Run OCR on ALL 4 views in parallel
     logger.debug("Step 1: Running OCR on all 4 views in parallel");
     const ocrResults = await Promise.all([
-      runOCR(views.front),
-      runOCR(views.back),
-      runOCR(views.panel_1),
-      runOCR(views.panel_2),
+      runOCR(views.front, "front"),
+      runOCR(views.back, "back"),
+      runOCR(views.panel_1, "panel_1"),
+      runOCR(views.panel_2, "panel_2"),
     ]);
 
     const rawOcrPerView: Record<string, OCRPackageDetails> = {
@@ -310,7 +491,36 @@ export async function verifyDrugPackage(
     // STEP 2: Merge into one best structured reading
     logger.debug("Step 2: Merging OCR results");
     const mergedOCR = mergeOCRResults(ocrResults);
+    const frontOCR = ocrResults[0];
+    const expiryDate = pickFirstUsable([
+      frontOCR.expiry_date,
+      ocrResults[1].expiry_date,
+      ocrResults[2].expiry_date,
+      ocrResults[3].expiry_date,
+    ]);
+
+    if (expiryDate) {
+      mergedOCR.expiry_date = expiryDate;
+    }
+
+    mergedOCR.drug_name = frontOCR.drug_name || "";
     const nafdacNumber = mergedOCR.nafdac_reg_no;
+    const expiryValue = isUsableText(mergedOCR.expiry_date)
+      ? mergedOCR.expiry_date.trim()
+      : "";
+    const parsedExpiry = expiryValue ? parseExpiryDate(expiryValue) : null;
+    const expiryAnalysis = {
+      detected: Boolean(expiryValue),
+      expiry_date: expiryValue || null,
+      is_expired: parsedExpiry ? parsedExpiry < new Date() : null,
+      note: !expiryValue
+        ? "Expiry date not detected"
+        : !parsedExpiry
+          ? "Expiry detected but format is not parseable"
+          : parsedExpiry < new Date()
+            ? "Product appears expired"
+            : "Product appears valid",
+    };
 
     if (!nafdacNumber || nafdacNumber.trim() === "") {
       logger.error("Could not extract NAFDAC number from any view");
@@ -442,6 +652,32 @@ export async function verifyDrugPackage(
     const lowestScore = Math.min(
       ...perViewAnalysis.map((v) => v.similarity_score),
     );
+    // Compute confidence band from scoring service (percentage) rather than raw SIFT score
+    const aggregateSimilarity = Math.round(
+      perViewAnalysis.reduce((s, v) => s + v.similarity_score, 0) /
+        perViewAnalysis.length,
+    );
+
+    const aggregateSift = {
+      match_verdict: allPassed,
+      similarity_score: aggregateSimilarity,
+      match_visualization: frontResult.match_visualization || "",
+    } as SIFTComparisonResult;
+
+    // scoringService expects ParsedPackageDetails; our mergedOCR shape is compatible
+    const authReport = scoringService.computeAuthenticityScore(
+      // cast because types differ by name but fields match
+      mergedOCR as any,
+      aggregateSift as any,
+    );
+
+    const confPercent = authReport.confidence; // 0-100
+
+    let confidenceBand: "very_high" | "high" | "moderate" | "low";
+    if (confPercent >= 90) confidenceBand = "very_high";
+    else if (confPercent >= 75) confidenceBand = "high";
+    else if (confPercent >= 50) confidenceBand = "moderate";
+    else confidenceBand = "low";
 
     const failedViews = perViewAnalysis
       .filter((v) => !v.verdict)
@@ -453,14 +689,16 @@ export async function verifyDrugPackage(
       : `Failed views: ${failedViews}.`;
 
     logger.info(
-      `Verification complete: authentic=${allPassed}, confidence=${lowestScore}`,
+      `Verification complete: authentic=${allPassed}, confidence=${lowestScore}, band=${confidenceBand}, expiry=${expiryAnalysis.expiry_date || "none"}, expired=${String(expiryAnalysis.is_expired)}`,
     );
 
     return {
       authentic: allPassed,
-      drug_name: mergedOCR.drug_name || "Unknown",
+      drug_name: frontOCR.drug_name || "Unknown",
       nafdac_number: nafdacNumber,
       overall_confidence: lowestScore,
+      confidence_band: confidenceBand,
+      expiry_analysis: expiryAnalysis,
       verdict_reason: verdictReason,
       per_view_analysis: perViewAnalysis,
       merged_ocr_data: mergedOCR,
