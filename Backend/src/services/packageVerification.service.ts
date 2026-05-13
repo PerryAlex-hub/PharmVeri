@@ -553,7 +553,9 @@ export async function verifyDrugPackage(
     logger.info(`Identified NAFDAC: ${nafdacNumber}`);
 
     // STEP 3: Fetch reference images (FRONT and BACK only - skip panels for speed)
-    logger.debug("Step 3: Fetching front and back reference images from Supabase");
+    logger.debug(
+      "Step 3: Fetching front and back reference images from Supabase",
+    );
     const [refFront, refBack] = await Promise.all([
       fetchRefBase64(nafdacNumber, "front"),
       fetchRefBase64(nafdacNumber, "back"),
@@ -592,17 +594,17 @@ export async function verifyDrugPackage(
     logger.debug("Step 6: Verifying NAFDAC number in database");
     let nafdacInfo;
     try {
-      nafdacInfo = await nafdacScraperService.searchNAFDACGreenbook(
-        nafdacNumber,
-      );
+      nafdacInfo =
+        await nafdacScraperService.searchNAFDACGreenbook(nafdacNumber);
     } catch (err) {
-      logger.warn(`NAFDAC verification failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(
+        `NAFDAC verification failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       nafdacInfo = null;
     }
 
     // STEP 7: Check authenticity (both front and back must pass)
-    const allPassed =
-      frontResult.match_verdict && backResult.match_verdict;
+    const allPassed = frontResult.match_verdict && backResult.match_verdict;
     const lowestScore = Math.min(
       frontResult.similarity_score,
       backResult.similarity_score,
@@ -643,11 +645,10 @@ export async function verifyDrugPackage(
     logger.debug("Step 8: Generating detailed authenticity analysis");
     let detailedAnalysis;
     try {
-      detailedAnalysis =
-        await detailedAnalysisService.generateDetailedAnalysis(
-          mergedOCR,
-          aggregateSift,
-        );
+      detailedAnalysis = await detailedAnalysisService.generateDetailedAnalysis(
+        mergedOCR,
+        aggregateSift,
+      );
     } catch (err) {
       logger.warn(
         `Detailed analysis failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -660,11 +661,10 @@ export async function verifyDrugPackage(
     let frontBackComparison;
     if (geminiVisionService.isEnabled()) {
       try {
-        frontBackComparison =
-          await geminiVisionService.analyzeProductImages(
-            refFront,
-            views.front,
-          );
+        frontBackComparison = await geminiVisionService.analyzeProductImages(
+          refFront,
+          views.front,
+        );
         logger.debug("Front image comparison complete");
       } catch (err) {
         logger.warn(
@@ -682,14 +682,15 @@ export async function verifyDrugPackage(
       scoring_confidence: confPercent,
       confidence_band: confidenceBand,
       expiry_analysis: expiryAnalysis,
-      ...(nafdacInfo && nafdacInfo.found && {
-        nafdac_verification: {
-          found: true,
-          product_name: nafdacInfo.productName,
-          manufacturer: nafdacInfo.manufacturer,
-          status: nafdacInfo.status,
-        },
-      }),
+      ...(nafdacInfo &&
+        nafdacInfo.found && {
+          nafdac_verification: {
+            found: true,
+            product_name: nafdacInfo.productName,
+            manufacturer: nafdacInfo.manufacturer,
+            status: nafdacInfo.status,
+          },
+        }),
       ...(frontBackComparison && {
         gemini_front_back_comparison: frontBackComparison,
       }),

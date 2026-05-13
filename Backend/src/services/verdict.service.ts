@@ -17,7 +17,8 @@ class VerdictService {
       detailedRecommendation: response.detailed_analysis?.recommendation,
       geminiVerdictAuthentic:
         response.gemini_front_back_comparison?.is_authentic,
-      geminiConfidence: response.gemini_front_back_comparison?.confidence_score ?? 0,
+      geminiConfidence:
+        response.gemini_front_back_comparison?.confidence_score ?? 0,
       isExpired: response.expiry_analysis.is_expired,
     };
 
@@ -41,9 +42,7 @@ class VerdictService {
     if (factors.detailedRecommendation) {
       if (factors.detailedRecommendation.includes("LIKELY GENUINE")) {
         authenticityScore += 10;
-      } else if (
-        factors.detailedRecommendation.includes("INCONCLUSIVE")
-      ) {
+      } else if (factors.detailedRecommendation.includes("INCONCLUSIVE")) {
         authenticityScore += 5;
       }
     }
@@ -51,8 +50,7 @@ class VerdictService {
 
     // Gemini Vision Comparison (5 points bonus)
     if (factors.geminiVerdictAuthentic) {
-      authenticityScore +=
-        factors.geminiConfidence * 5;
+      authenticityScore += factors.geminiConfidence * 5;
     }
     maxScore += 5;
 
@@ -61,9 +59,7 @@ class VerdictService {
       authenticityScore -= 10;
     }
 
-    const percentageScore = Math.round(
-      (authenticityScore / maxScore) * 100,
-    );
+    const percentageScore = Math.round((authenticityScore / maxScore) * 100);
 
     // Determine final verdict based on weighted score and SIFT pass
     let conclusion: FinalVerdict["conclusion"];
@@ -72,8 +68,7 @@ class VerdictService {
     if (percentageScore >= 80) {
       // 80-100%: AUTHENTIC
       conclusion = "AUTHENTIC";
-      reason =
-        "All verification checks passed. Product appears to be genuine.";
+      reason = "All verification checks passed. Product appears to be genuine.";
     } else if (percentageScore >= 65) {
       // 65-79%: LIKELY_AUTHENTIC
       conclusion = "LIKELY_AUTHENTIC";
@@ -82,8 +77,7 @@ class VerdictService {
     } else if (percentageScore >= 50) {
       // 50-64%: INCONCLUSIVE
       conclusion = "INCONCLUSIVE";
-      reason =
-        "Verification results are mixed. Manual review recommended.";
+      reason = "Verification results are mixed. Manual review recommended.";
     } else if (percentageScore >= 35) {
       // 35-49%: LIKELY_COUNTERFEIT
       conclusion = "LIKELY_COUNTERFEIT";
@@ -106,9 +100,7 @@ class VerdictService {
   /**
    * Generate a frontend-ready display object
    */
-  generateFrontendDisplay(
-    response: VerificationResponse,
-  ): FrontendDisplay {
+  generateFrontendDisplay(response: VerificationResponse): FrontendDisplay {
     const finalVerdict = this.computeFinalVerdict(response);
 
     // Convert SIFT similarity score to percentage (normalize by 200 as reference)

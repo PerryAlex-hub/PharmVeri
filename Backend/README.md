@@ -1,57 +1,194 @@
-# PharmVeri 🔬💊
+# PharmVeri
 
-**AI-Powered Product Authentication & Counterfeit Detection for Nigerian Pharmaceuticals**
+PharmVeri is a backend verification system for pharmaceutical package authentication and counterfeit detection in Nigeria. It combines OCR, front/back image comparison, NAFDAC verification, Gemini-based visual analysis, and a final verdict engine that produces one clear authenticity conclusion for the frontend.
 
-PharmVeri is a backend verification system for detecting counterfeit medicines in Nigeria using advanced OCR, computer vision, barcode validation, and NAFDAC database integration.
+The current implementation focuses on speed and practical accuracy. Front and back images are the primary inputs, OCR is used to extract text and package details, and the backend merges all evidence into a single result object that is easy to display in a user interface.
 
----
+## What the system does
 
-## Features
+- Extracts product information from package images
+- Uses the front image as the source of the drug name
+- Parses expiry dates from structured OCR and raw text
+- Verifies the NAFDAC registration number against the Greenbook source
+- Compares the submitted front and back images with authenticated reference images
+- Uses Gemini 2.5 Flash for semantic visual comparison and detailed analysis
+- Produces one final authenticity verdict for the frontend
 
-- **OCR Identification**: Extract drug name and NAFDAC registration from product images
-- **SIFT Authentication**: Compare product images against reference database using Roboflow SIFT
-- **Barcode Scanning**: Extract and validate barcodes using Quagga2
-- **Barcode Lookup**: Cross-reference product barcodes with barcodelookup.com API
-- **NAFDAC Validation**: Verify registration against Nigeria's official NAFDAC Greenbook
-- **Smart Scoring Engine**: Dynamic authenticity scoring with weighted factors (SIFT, NAFDAC, expiry, barcode)
-- **Supabase Storage**: Secure cloud storage for reference product images
-- **Resilient APIs**: Retry logic and exponential backoff for external service calls
-- **Parallel Processing**: Optimized verification pipeline with concurrent API calls
+## Core pipeline
 
----
-
-## System Architecture
-
+```text
+Frontend uploads front and back images
+    ↓
+POST /api/verify
+    ↓
+OCR runs on each view
+    ↓
+Raw extracted text is logged for each image
+    ↓
+Text is normalized and merged
+    ↓
+Drug name is taken from the front image only
+    ↓
+NAFDAC number and expiry date are extracted
+    ↓
+NAFDAC Greenbook lookup runs
+    ↓
+Reference images are loaded from Supabase
+    ↓
+Front/back SIFT comparison runs
+    ↓
+Gemini front/back visual comparison runs
+    ↓
+Gemini detailed analysis runs
+    ↓
+Final verdict is computed
 ```
-Frontend (User takes photo)
-    ↓
-POST /api/verify (base64 image)
-    ↓
-Backend Verification Pipeline:
-    ├─ OCR Identification (Roboflow)
-    ├─ SIFT Comparison (Roboflow) ─┐
-    ├─ NAFDAC Validation (parallel) ├─ Parallel
-    ├─ Barcode Scanning (Quagga2) ──┤
-    └─ Barcode Lookup API ──────────┘
-    ↓
-Scoring Engine
-    ↓
-Response: { status: GENUINE|SUSPICIOUS|COUNTERFEIT, score: 0-100, details }
-```
 
----
+## Step-by-step analysis flow
 
-## Quick Start (Local Development)
+### 1. Image intake
+
+The API receives base64-encoded images from the frontend. The main decision path expects a front image and a back image.
+
+### 2. OCR extraction
+
+Each image is processed independently. The backend keeps both the raw extracted text and the parsed package details. The extracted text for every image is logged to the console so the analysis trail can be inspected later.
+
+### 3. Field normalization
+
+The OCR output is cleaned and merged into a working record. This record is used to derive the product name, NAFDAC number, manufacturer, batch number, and expiry date.
+
+Rules enforced by the current implementation:
+
+- Drug name comes from the front image only
+- Placeholder text such as `not visible`, `n/a`, or `not specified` is ignored
+- Expiry parsing supports formats such as `MM-YY`, `MM/YYYY`, and `YYYY-MM`
+- Two-digit years are expanded into the 2000s when appropriate
+
+### 4. NAFDAC verification
+
+The extracted NAFDAC number is validated against the NAFDAC Greenbook source. This helps determine whether the product exists in the official registry and whether the name and manufacturer are consistent with the database record.
+
+### 5. Reference image retrieval
+
+Authentic reference images are loaded from Supabase Storage using the NAFDAC number and the requested view.
+
+### 6. SIFT comparison
+
+The submitted front and back images are compared against the reference images using SIFT. This yields a similarity signal that contributes to the overall authenticity assessment.
+
+The current flow uses front and back only. The older multi-panel path was removed to reduce latency.
+
+### 7. Gemini visual analysis
+
+Gemini 2.5 Flash is used to inspect the same front/back pair semantically. This is intended to catch issues that low-level matching may miss, such as layout inconsistencies, typography issues, branding anomalies, and suspicious packaging differences.
+
+Gemini returns:
+
+- `is_authentic`
+- `confidence_score` between 0 and 1
+- `reasoning_details`
+
+### 8. Detailed Gemini analysis
+
+The merged OCR data and verification outputs are passed to Gemini for a written assessment. The result includes a summary, positive authenticity indicators, risk factors, and a recommendation.
+
+The recommendation is typically one of:
+
+- `LIKELY_GENUINE`
+- `INCONCLUSIVE`
+- `LIKELY_COUNTERFEIT`
+
+### 9. Final verdict
+
+The backend combines the evidence into a single verdict for the frontend.
+
+Current verdict bands:
+
+- `AUTHENTIC`: 80-100%
+- `LIKELY_AUTHENTIC`: 65-79%
+- `INCONCLUSIVE`: 50-64%
+- `LIKELY_COUNTERFEIT`: 35-49%
+- `COUNTERFEIT`: 0-34%
+
+## What the frontend should show
+
+The frontend should present a simple, high-confidence result rather than exposing every raw technical detail first.
+
+Recommended display order:
+
+1. Final verdict label
+2. Confidence percentage
+3. One-line reason
+4. Product name and NAFDAC number
+5. Expiry status
+6. NAFDAC verification status
+7. SIFT confidence and scoring confidence
+8. Summary of authenticity indicators and risk factors
+
+For advanced users or debugging, a collapsible section can expose the full response payload.
+
+## Main response shape
+
+The backend is designed to return a frontend-friendly object with the following important fields:
+
+- `final_verdict`
+- `drug_name`
+- `nafdac_number`
+- `manufacturer`
+- `expiry_date`
+- `is_expired`
+- `sift_match_percentage`
+- `scoring_confidence`
+- `confidence_band`
+- `nafdac_verified`
+- `nafdac_product_name`
+- `authenticity_summary`
+- `authenticity_indicators`
+- `risk_factors`
+- `visual_comparison_verdict`
+- `full_response`
+
+## Technical stack
+
+### Backend
+
+- Node.js
+- TypeScript
+- Express
+- Winston for logging
+
+### Analysis and verification services
+
+- Roboflow OCR workflow
+- Roboflow SIFT workflow
+- Google Gemini 2.5 Flash
+- NAFDAC Greenbook scraping and lookup
+- Supabase Storage for reference images
+
+### Supporting utilities
+
+- barcode scanning and lookup support
+- image processing helpers
+- scoring and verdict services
+
+## Important implementation notes
+
+- The drug name must come from the front image only.
+- Expiry placeholders must not be treated as valid dates.
+- The system logs the extracted text for each image to the console.
+- Gemini requests must use cleaned base64 data and the correct schema shape.
+- The final response should give the frontend one clear conclusion instead of forcing it to interpret raw scores.
+
+## Local development
 
 ### Prerequisites
 
-- Node.js 18+
-- npm or yarn
-- Environment variables (see `.env.example`)
+- Node.js 18 or newer
+- npm
+- Environment variables defined in `.env`
 
 ### Setup
-
-1. **Clone and install**:
 
 ```bash
 git clone <repo-url>
@@ -59,304 +196,72 @@ cd PharmVeri
 npm install
 ```
 
-2. **Configure environment**:
+Create a local environment file:
 
 ```bash
-cp .env.example .env
-# Edit .env with your API keys:
-# - ROBOFLOW_API_KEY
-# - SUPABASE_URL and SUPABASE_ANON_KEY
-# - REFERENCE_IMAGES_PATH (optional)
+copy .env.example .env
 ```
 
-3. **Run locally**:
+Run the server:
 
 ```bash
 npm run dev
 ```
 
-The server starts at `http://localhost:3000`
+## Environment variables
 
-4. **Test the API**:
+| Variable | Description |
+| --- | --- |
+| `PORT` | Server port |
+| `NODE_ENV` | Runtime mode |
+| `ROBOFLOW_API_KEY` | Roboflow API key |
+| `ROBOFLOW_WORKSPACE_NAME` | Roboflow workspace name |
+| `OCR_WORKFLOW_ID` | OCR workflow ID |
+| `SIFT_WORKFLOW_ID` | SIFT workflow ID |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_ANON_KEY` | Supabase anon key |
+| `REFERENCE_IMAGES_PATH` | Local reference image path |
+| `REFERENCE_INDEX_FILE` | Reference index file |
+| `GEMINI_API_KEY` | Gemini API key |
+| `LOG_LEVEL` | Logging level |
 
-```bash
-curl -X POST http://localhost:3000/api/verify \
-  -H "Content-Type: application/json" \
-  -d '{
-    "base64Image": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
-  }'
-```
-
----
-
-## Deployment to Render
-
-### Step 1: Prepare Your Repository
-
-Ensure your repository includes:
-
-- ✅ `package.json` with build and start scripts
-- ✅ `tsconfig.json` for TypeScript compilation
-- ✅ `.env.example` with all required variables
-- ✅ `.gitignore` (exclude node_modules, .env, etc.)
-
-### Step 2: Set Up on Render
-
-1. **Connect your GitHub repository**:
-   - Go to [render.com](https://render.com)
-   - Click "New +" → "Web Service"
-   - Connect your GitHub account
-   - Select the PharmVeri repository
-
-2. **Configure the Web Service**:
-
-   | Setting           | Value                            |
-   | ----------------- | -------------------------------- |
-   | **Name**          | pharmveri-api                    |
-   | **Environment**   | Node                             |
-   | **Region**        | Choose closest to your users     |
-   | **Branch**        | main (or your deployment branch) |
-   | **Build Command** | `npm install && npm run build`   |
-   | **Start Command** | `npm start`                      |
-
-3. **Add Environment Variables**:
-   In the Render dashboard, go to **Environment** and add:
-
-   ```
-   NODE_ENV=production
-   PORT=3000
-
-   ROBOFLOW_API_KEY=<your_key>
-   ROBOFLOW_WORKSPACE_NAME=<your_workspace>
-   OCR_WORKFLOW_ID=<your_ocr_workflow_id>
-   SIFT_WORKFLOW_ID=<your_sift_workflow_id>
-
-   SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_ANON_KEY=<your_anon_key>
-
-   REFERENCE_IMAGES_PATH=src/assets/reference-images
-   REFERENCE_INDEX_FILE=index.json
-
-   LOG_LEVEL=info
-   ```
-
-4. **Deploy**:
-   - Click "Create Web Service"
-   - Render automatically deploys from your main branch
-   - Check deployment status in the dashboard
-
-### Step 3: Configure CORS (if needed)
-
-If your frontend is on a different domain, add CORS middleware. Update `src/index.ts`:
-
-```typescript
-import cors from "cors";
-
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "*",
-    credentials: true,
-  }),
-);
-```
-
-Install cors:
-
-```bash
-npm install cors
-npm install --save-dev @types/cors
-```
-
----
-
-## API Endpoints
+## API endpoint
 
 ### POST `/api/verify`
 
-Verify a product image for authenticity.
-
-**Request**:
+Request:
 
 ```json
 {
-  "base64Image": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+  "front": "base64-image-data",
+  "back": "base64-image-data"
 }
 ```
 
-**Response (Success - 200)**:
+The exact response is the structured verification object returned by the backend, including the final verdict and the detailed analysis fields described above.
 
-```json
-{
-  "status": "GENUINE",
-  "score": 87.5,
-  "details": {
-    "drugName": "Aspirin 500mg",
-    "nafdacStatus": "✓ Valid Registration",
-    "barcodeStatus": "✓ Verified",
-    "expiryStatus": "✓ Valid",
-    "siftSimilarity": 92.3
-  }
-}
+## Reference images
+
+See [SUPABASE_STORAGE_SETUP.md](./SUPABASE_STORAGE_SETUP.md) for instructions on uploading and organizing reference images in Supabase Storage.
+
+## Project structure
+
+```text
+src/
+  index.ts
+  config/
+  controllers/
+  routes/
+  services/
+  types/
+  utils/
 ```
 
-**Possible Status Values**:
+## Related documentation
 
-- `GENUINE` (score > 75)
-- `SUSPICIOUS` (score 50-75)
-- `COUNTERFEIT` (score < 50)
+- [VERIFICATION_SYSTEM.md](./VERIFICATION_SYSTEM.md)
+- [SUPABASE_STORAGE_SETUP.md](./SUPABASE_STORAGE_SETUP.md)
 
-**Response (Error - 400/500)**:
-
-```json
-{
-  "error": "OCR identification failed"
-}
-```
-
----
-
-##  Configuration
-
-### Environment Variables
-
-| Variable                  | Description                | Example                          |
-| ------------------------- | -------------------------- | -------------------------------- |
-| `PORT`                    | Server port                | `3000`                           |
-| `NODE_ENV`                | Environment mode           | `production` or `development`    |
-| `ROBOFLOW_API_KEY`        | Roboflow API key           | `obtained from Roboflow`         |
-| `ROBOFLOW_WORKSPACE_NAME` | Roboflow workspace         | `your-workspace`                 |
-| `OCR_WORKFLOW_ID`         | OCR workflow ID            | `workflow-id-xxx`                |
-| `SIFT_WORKFLOW_ID`        | SIFT workflow ID           | `workflow-id-yyy`                |
-| `SUPABASE_URL`            | Supabase project URL       | `https://xxx.supabase.co`        |
-| `SUPABASE_ANON_KEY`       | Supabase anon key          | `eyJhbGc...`                     |
-| `REFERENCE_IMAGES_PATH`   | Local reference images dir | `src/assets/reference-images`    |
-| `REFERENCE_INDEX_FILE`    | Reference index file       | `index.json`                     |
-| `LOG_LEVEL`               | Logging level              | `debug`, `info`, `warn`, `error` |
-
-### Reference Images Setup
-
-See [SUPABASE_STORAGE_SETUP.md](./SUPABASE_STORAGE_SETUP.md) for detailed instructions on uploading reference images to Supabase Storage.
-
----
-
-##  Performance Considerations
-
-- **OCR timeout**: 45 seconds (Roboflow)
-- **SIFT timeout**: 60 seconds (Roboflow)
-- **NAFDAC timeout**: 15 seconds (parallel, non-blocking)
-- **Barcode lookup timeout**: 10 seconds
-- **Retry strategy**: 3 attempts with exponential backoff for transient failures
-
----
-
-##  Project Structure
-
-```
-PharmVeri/
-├── src/
-│   ├── index.ts                 # Express app entry point
-│   ├── config/
-│   │   └── environment.ts       # Env variable validation
-│   ├── controllers/
-│   │   └── verification.controller.ts  # Request handlers
-│   ├── routes/
-│   │   ├── verification.routes.ts     # API routes
-│   │   └── test.routes.ts
-│   ├── services/
-│   │   ├── roboflow.service.ts        # OCR & SIFT
-│   │   ├── barcodeScanner.service.ts  # Quagga2 barcode extraction
-│   │   ├── barcodeAPI.service.ts      # Barcode lookup
-│   │   ├── nafdacScraper.service.ts   # NAFDAC validation
-│   │   ├── referenceImage.service.ts  # Reference image management
-│   │   ├── supabaseStorage.service.ts # Supabase Storage integration
-│   │   └── scoring.service.ts         # Authenticity scoring
-│   ├── types/
-│   │   └── verification.types.ts      # TypeScript interfaces
-│   └── utils/
-│       ├── logger.ts            # Winston logger
-│       └── imageProcessing.ts   # Base64 & file conversions
-├── .env.example            # Environment template
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
----
-
-##  Security Notes
-
-- **API Keys**: Never commit `.env` files; use environment variables
-- **Base64 Images**: Validate size limits on the frontend (< 5MB recommended)
-- **Rate Limiting**: Consider adding rate limiting for production
-- **CORS**: Configure CORS appropriately for your frontend domain
-- **Supabase Keys**: Use read-only keys where possible
-
----
-
-##  Troubleshooting
-
-### Issue: Barcode scanning fails with "ENOENT: no such file or directory"
-
-- **Cause**: Hardcoded `/tmp` path on Windows
-- **Fix**: Code uses `os.tmpdir()` for cross-platform support 
-
-### Issue: NAFDAC lookup times out
-
-- **Cause**: Slow API response or network delay
-- **Fix**: NAFDAC runs in parallel; timeout is 15 seconds, non-blocking
-
-### Issue: Supabase Storage returns 403 Unauthorized
-
-- **Cause**: Incorrect SUPABASE_ANON_KEY or bucket permissions
-- **Fix**: Verify credentials in `.env` and bucket is publicly readable
-
-### Issue: Images not found in reference storage
-
-- **Cause**: Images stored in wrong path or bucket
-- **Fix**: Images can be in bucket root or `reference/` folder; code checks both
-
----
-
-## Testing
-
-Run test endpoints:
-
-```bash
-# Test barcode scanning
-curl -X POST http://localhost:3000/api/test/barcode \
-  -H "Content-Type: application/json" \
-  -d '{"imagePath": "path/to/image.jpg"}'
-
-# Full verification test
-curl -X POST http://localhost:3000/api/verify \
-  -H "Content-Type: application/json" \
-  -d '{"imagePath": "path/to/image.jpg"}'
-```
-
----
-
-##  Next Steps
-
-1. Upload reference images to Supabase Storage
-2. Test the verification API with sample product images
-3. Integrate frontend application
-4. Set up monitoring and error logging
-5. Implement rate limiting
-6. Add user authentication if needed
-
----
-
-## License
-
-ISC
-
----
-
-##  Author
-
-PharmVeri Development Team
-
----
 
 ## Support
 

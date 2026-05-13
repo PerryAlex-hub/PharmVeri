@@ -1,6 +1,9 @@
 import axios from "axios";
 import { logger } from "../utils/logger";
-import { OCRPackageDetails, SIFTComparisonResult } from "../types/verification.types";
+import {
+  OCRPackageDetails,
+  SIFTComparisonResult,
+} from "../types/verification.types";
 
 export interface DetailedAnalysisResult {
   summary: string;
@@ -100,9 +103,7 @@ Return ONLY valid JSON, no markdown or extra text.`;
         return null;
       }
 
-      logger.info(
-        `Detailed analysis complete: ${analysis.recommendation}`,
-      );
+      logger.info(`Detailed analysis complete: ${analysis.recommendation}`);
 
       return analysis;
     } catch (error) {
