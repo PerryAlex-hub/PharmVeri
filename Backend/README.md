@@ -210,20 +210,20 @@ npm run dev
 
 ## Environment variables
 
-| Variable | Description |
-| --- | --- |
-| `PORT` | Server port |
-| `NODE_ENV` | Runtime mode |
-| `ROBOFLOW_API_KEY` | Roboflow API key |
-| `ROBOFLOW_WORKSPACE_NAME` | Roboflow workspace name |
-| `OCR_WORKFLOW_ID` | OCR workflow ID |
-| `SIFT_WORKFLOW_ID` | SIFT workflow ID |
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_ANON_KEY` | Supabase anon key |
-| `REFERENCE_IMAGES_PATH` | Local reference image path |
-| `REFERENCE_INDEX_FILE` | Reference index file |
-| `GEMINI_API_KEY` | Gemini API key |
-| `LOG_LEVEL` | Logging level |
+| Variable                  | Description                |
+| ------------------------- | -------------------------- |
+| `PORT`                    | Server port                |
+| `NODE_ENV`                | Runtime mode               |
+| `ROBOFLOW_API_KEY`        | Roboflow API key           |
+| `ROBOFLOW_WORKSPACE_NAME` | Roboflow workspace name    |
+| `OCR_WORKFLOW_ID`         | OCR workflow ID            |
+| `SIFT_WORKFLOW_ID`        | SIFT workflow ID           |
+| `SUPABASE_URL`            | Supabase project URL       |
+| `SUPABASE_ANON_KEY`       | Supabase anon key          |
+| `REFERENCE_IMAGES_PATH`   | Local reference image path |
+| `REFERENCE_INDEX_FILE`    | Reference index file       |
+| `GEMINI_API_KEY`          | Gemini API key             |
+| `LOG_LEVEL`               | Logging level              |
 
 ## API endpoint
 
@@ -261,7 +261,6 @@ src/
 
 - [VERIFICATION_SYSTEM.md](./VERIFICATION_SYSTEM.md)
 - [SUPABASE_STORAGE_SETUP.md](./SUPABASE_STORAGE_SETUP.md)
-
 
 ## Support
 

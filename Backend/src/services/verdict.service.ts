@@ -22,44 +22,65 @@ class VerdictService {
       isExpired: response.expiry_analysis.is_expired,
     };
 
-    // Count positive factors
+    // Dynamic weighted scoring (Gemini prioritized)
+    // Weights (modifiable):
+    const GEMINI_WEIGHT = 40; // Gemini (0-1) scaled to this weight
+    const SIFT_WEIGHT = 15; // normalized sift contribution
+    const SCORING_WEIGHT = 20; // scoring_confidence (0-100)
+    const NAFDAC_WEIGHT = 10; // boolean
+    const DETAILED_WEIGHT = 10; // detailedRecommendation
+    const EXPIRY_PENALTY = 10; // subtract if expired
+
     let authenticityScore = 0;
     let maxScore = 0;
 
-    // SIFT Match (40 points)
-    if (factors.siftPass) authenticityScore += 40;
-    maxScore += 40;
+    // Gemini vision (preferred): use continuous confidence 0-1 * GEMINI_WEIGHT
+    if (typeof factors.geminiConfidence === "number" && factors.geminiConfidence >= 0) {
+      authenticityScore += factors.geminiConfidence * GEMINI_WEIGHT;
+      maxScore += GEMINI_WEIGHT;
+    }
 
-    // Scoring Confidence (30 points)
-    authenticityScore += (factors.scoringConfidence / 100) * 30;
-    maxScore += 30;
+    // SIFT: prefer continuous sift_confidence if present, else fallback to boolean pass
+    const rawSift = (response as any).sift_confidence ?? 0; // raw numeric score
+    // Normalize by 200 (keeps previous frontend convention), clamp to 0-1
+    const normalizedSift = Math.max(0, Math.min(1, rawSift / 200));
+    if (normalizedSift > 0) {
+      authenticityScore += normalizedSift * SIFT_WEIGHT;
+      maxScore += SIFT_WEIGHT;
+    } else if (factors.siftPass) {
+      // fallback: grant partial SIFT weight if boolean pass exists but no numeric score
+      authenticityScore += SIFT_WEIGHT * 0.9;
+      maxScore += SIFT_WEIGHT;
+    }
 
-    // NAFDAC Verification (15 points)
-    if (factors.nafdacFound) authenticityScore += 15;
-    maxScore += 15;
+    // Scoring confidence (0-100 mapped to SCORING_WEIGHT)
+    authenticityScore += (factors.scoringConfidence / 100) * SCORING_WEIGHT;
+    maxScore += SCORING_WEIGHT;
 
-    // Detailed Analysis Recommendation (10 points)
+    // NAFDAC verification
+    if (factors.nafdacFound) authenticityScore += NAFDAC_WEIGHT;
+    maxScore += NAFDAC_WEIGHT;
+
+    // Detailed analysis recommendation
     if (factors.detailedRecommendation) {
       if (factors.detailedRecommendation.includes("LIKELY GENUINE")) {
-        authenticityScore += 10;
+        authenticityScore += DETAILED_WEIGHT;
       } else if (factors.detailedRecommendation.includes("INCONCLUSIVE")) {
-        authenticityScore += 5;
+        authenticityScore += DETAILED_WEIGHT * 0.5;
       }
     }
-    maxScore += 10;
-
-    // Gemini Vision Comparison (5 points bonus)
-    if (factors.geminiVerdictAuthentic) {
-      authenticityScore += factors.geminiConfidence * 5;
-    }
-    maxScore += 5;
+    maxScore += DETAILED_WEIGHT;
 
     // Penalty for expired product
     if (factors.isExpired) {
-      authenticityScore -= 10;
+      authenticityScore -= EXPIRY_PENALTY;
     }
 
-    const percentageScore = Math.round((authenticityScore / maxScore) * 100);
+    // Avoid division by zero
+    const percentageScore =
+      maxScore > 0
+        ? Math.round((authenticityScore / maxScore) * 100)
+        : 0;
 
     // Determine final verdict based on weighted score and SIFT pass
     let conclusion: FinalVerdict["conclusion"];
