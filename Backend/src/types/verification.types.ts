@@ -121,13 +121,75 @@ export interface ExpiryAnalysis {
   note: string;
 }
 
+export interface GeminiVisionAnalysis {
+  is_authentic: boolean;
+  confidence_score: number; // 0.0 to 1.0
+  reasoning_details: string;
+}
+
+export interface NAFDACVerificationResult {
+  found: boolean;
+  product_name?: string;
+  manufacturer?: string;
+  status?: string;
+  approval_date?: string;
+}
+
+export interface DetailedAnalysisResult {
+  summary: string;
+  authenticity_indicators: string[];
+  risk_factors: string[];
+  recommendation: string;
+}
+
+export interface FinalVerdict {
+  conclusion: "AUTHENTIC" | "LIKELY_AUTHENTIC" | "INCONCLUSIVE" | "LIKELY_COUNTERFEIT" | "COUNTERFEIT";
+  confidence_percentage: number; // 0-100
+  reason: string; // Short explanation of the conclusion
+}
+
+export interface FrontendDisplay {
+  // Main Verdict
+  final_verdict: FinalVerdict;
+
+  // Product Info
+  drug_name: string;
+  nafdac_number: string;
+  manufacturer?: string;
+  expiry_date: string | null;
+  is_expired: boolean | null;
+
+  // Key Scores
+  sift_match_percentage: number; // 0-100, derived from SIFT
+  scoring_confidence: number; // 0-100
+  confidence_band: "very_high" | "high" | "moderate" | "low";
+
+  // Verification Status
+  nafdac_verified: boolean;
+  nafdac_product_name?: string;
+
+  // Detailed Insights
+  authenticity_summary?: string; // From detailed analysis
+  authenticity_indicators?: string[]; // Positive signs
+  risk_factors?: string[]; // Concerns to flag
+  visual_comparison_verdict?: string; // From Gemini vision
+
+  // Detailed Data (for advanced users)
+  full_response?: VerificationResponse;
+}
+
 export interface VerificationResponse {
   authentic: boolean;
   drug_name: string;
   nafdac_number: string;
-  overall_confidence: number;
+  sift_confidence: number;
+  scoring_confidence: number;
   confidence_band: "very_high" | "high" | "moderate" | "low";
+  final_verdict?: FinalVerdict;
   expiry_analysis: ExpiryAnalysis;
+  nafdac_verification?: NAFDACVerificationResult;
+  gemini_front_back_comparison?: GeminiVisionAnalysis;
+  detailed_analysis?: DetailedAnalysisResult;
   verdict_reason: string;
   per_view_analysis: ViewAnalysis[];
   merged_ocr_data: OCRPackageDetails;

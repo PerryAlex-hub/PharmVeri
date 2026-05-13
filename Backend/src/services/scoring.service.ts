@@ -200,7 +200,9 @@ class ScoringService {
       }
     }
 
-    const delimiterMatch = normalized.match(/^([0-9]{1,4})[\/-]([0-9]{1,4})$/);
+    const delimiterMatch = normalized.match(
+      /^([0-9]{1,4})[\s\/\-.]([0-9]{1,4})$/,
+    );
     if (!delimiterMatch) {
       return null;
     }
@@ -213,14 +215,27 @@ class ScoringService {
     }
 
     if (delimiterMatch[1].length === 4) {
+      if (second < 1 || second > 12) {
+        return null;
+      }
       return new Date(first, second, 0);
     }
 
-    return new Date(second, first, 0);
+    if (first < 1 || first > 12) {
+      return null;
+    }
+
+    const year = delimiterMatch[2].length === 2 ? 2000 + second : second;
+    if (!Number.isFinite(year) || year < 2000 || year > 2100) {
+      return null;
+    }
+
+    return new Date(year, first, 0);
   }
 
   private isExpiryPlaceholder(expiryDate: string): boolean {
     const normalized = this.normalizeExpiryDate(expiryDate).toLowerCase();
+    const isNotVisiblePlaceholder = normalized.startsWith("not visible");
     return [
       "not visible in the image",
       "not provided",
@@ -228,7 +243,9 @@ class ScoringService {
       "not available",
       "unknown",
       "n/a",
-    ].includes(normalized);
+    ].includes(normalized)
+      ? true
+      : isNotVisiblePlaceholder;
   }
 
   private isExpired(expiryDate: string | undefined): boolean {
