@@ -121,7 +121,9 @@ export function parseExpiryDate(expiryDate: string): Date | null {
     }
   }
 
-  const delimiterMatch = normalized.match(/^([0-9]{1,4})[\s\/\-.]([0-9]{1,4})$/);
+  const delimiterMatch = normalized.match(
+    /^([0-9]{1,4})[\s\/\-.]([0-9]{1,4})$/,
+  );
   if (!delimiterMatch) {
     return null;
   }
@@ -204,7 +206,9 @@ export function createEmptyPackageDetails(): OCRPackageDetails {
   };
 }
 
-export function mergeOCRResults(results: OCRPackageDetails[]): OCRPackageDetails {
+export function mergeOCRResults(
+  results: OCRPackageDetails[],
+): OCRPackageDetails {
   const pickNafdac = (): string => {
     for (const result of results) {
       const candidate = extractNafdacCandidate(result.nafdac_reg_no);
@@ -217,13 +221,17 @@ export function mergeOCRResults(results: OCRPackageDetails[]): OCRPackageDetails
   };
 
   const pickBest = (field: keyof OCRPackageDetails): string => {
-    const candidates = results.map((result) => result[field]).filter(isUsableValue);
+    const candidates = results
+      .map((result) => result[field])
+      .filter(isUsableValue);
 
     if (candidates.length === 0) {
       return "";
     }
 
-    return candidates.reduce((first, second) => (first.length >= second.length ? first : second));
+    return candidates.reduce((first, second) =>
+      first.length >= second.length ? first : second,
+    );
   };
 
   return {
