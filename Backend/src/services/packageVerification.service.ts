@@ -1,500 +1,58 @@
-import axios from "axios";
-import { createClient } from "@supabase/supabase-js";
 import { logger } from "../utils/logger";
-import { config } from "../config/environment";
 import {
-  PackageViews,
   OCRPackageDetails,
-  ViewAnalysis,
-  VerificationResponse,
-  PanelMatch,
+  PackageViews,
   SIFTComparisonResult,
-  GeminiVisionAnalysis,
+  VerificationResponse,
+  ViewAnalysis,
 } from "../types/verification.types";
 import { scoringService } from "./scoring.service";
 import { geminiVisionService } from "./geminiVision.service";
 import { detailedAnalysisService } from "./detailedAnalysis.service";
 import { nafdacScraperService } from "./nafdacScraper.service";
 import { verdictService } from "./verdict.service";
+import { fetchRefBase64 } from "./packageVerification.reference";
+import {
+  isUsableText,
+  mergeOCRResults,
+  parseExpiryDate,
+  pickFirstUsable,
+} from "./packageVerification.helpers";
+import { runOCR, runSIFT } from "./packageVerification.roboflow";
 
-// --- Config ---
-const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY!;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-
-const WORKSPACE = "ifechukwu-nwokedi-s-workspace";
-const OCR_WORKFLOW_ID = "pharma-package-reader-gpt4o-1778548637743";
-const SIFT_WORKFLOW_ID = "pharma-sift-authenticity-verifier-1778509003924";
-const BASE_URL = "https://serverless.roboflow.com";
-const OCR_TIMEOUT_MS = 90000;
-const SIFT_TIMEOUT_MS = 90000;
-
-const supabase = createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY);
-
-function stripMarkdownCodeFences(value: string): string {
-  return value
-    .replace(/^```[\w-]*\n?/, "")
-    .replace(/\n?```$/, "")
-    .trim();
+function buildConfidenceBand(
+  confidence: number,
+): "very_high" | "high" | "moderate" | "low" {
+  if (confidence >= 90) return "very_high";
+  if (confidence >= 75) return "high";
+  if (confidence >= 50) return "moderate";
+  return "low";
 }
 
-function isUsableText(value: unknown): value is string {
-  if (typeof value !== "string") {
-    return false;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  const isNotVisiblePlaceholder = normalized.startsWith("not visible");
-  return (
-    normalized !== "" &&
-    normalized !== "unknown" &&
-    normalized !== "not provided" &&
-    normalized !== "not specified" &&
-    normalized !== "not available" &&
-    normalized !== "n/a" &&
-    !isNotVisiblePlaceholder
-  );
-}
-
-function normalizeExpiryCandidate(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function extractExpiryDate(text: string): string {
-  const normalizedText = text.replace(/\s+/g, " ");
-  const patterns = [
-    /\b(?:exp(?:iry)?|exp\.?\s*date)\b[:\s-]*([0-9]{1,2}[\s/-][0-9]{2,4})\b/i,
-    /\b(?:exp(?:iry)?|exp\.?\s*date)\b[:\s-]*([0-9]{4}[\s/-][0-9]{1,2})\b/i,
-    /\b(?:exp(?:iry)?|exp\.?\s*date)\b[:\s-]*([A-Za-z]{3,9}\.??\s+[0-9]{4})\b/i,
-    /\b([0-9]{1,2}[\s/-][0-9]{2,4})\b(?=\s*(?:exp(?:iry)?|exp\.?\s*date)\b)/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = normalizedText.match(pattern);
-    if (match?.[1]) {
-      return normalizeExpiryCandidate(match[1]);
-    }
-  }
-
-  const loosePatterns = [
-    /\b[0-9]{1,2}\/[0-9]{2,4}\b/g,
-    /\b[0-9]{4}\/[0-9]{1,2}\b/g,
-    /\b[0-9]{1,2}-[0-9]{2,4}\b/g,
-    /\b[A-Za-z]{3,9}\.??\s+[0-9]{4}\b/g,
-  ];
-
-  for (const pattern of loosePatterns) {
-    const match = normalizedText.match(pattern);
-    if (match?.[0]) {
-      return normalizeExpiryCandidate(match[0]);
-    }
-  }
-
-  return "";
-}
-
-function extractNafdacNumber(text: string): string {
-  const normalizedText = text.replace(/\s+/g, " ");
-  const labeledMatch = normalizedText.match(
-    /\b(?:nafdac(?:\s+reg(?:istration)?\.?\s*no\.?|\.?\s*reg\.?\s*no\.?)?)\b[:\s-]*([A-Z0-9][A-Z0-9\s-]{3,})/i,
-  );
-
-  const candidate =
-    labeledMatch?.[1] ??
-    normalizedText.match(/\b[A-Z0-9]{1,3}\s*-\s*[A-Z0-9]{2,6}\b/i)?.[0] ??
-    "";
-  if (!candidate) {
-    return "";
-  }
-
-  return candidate
-    .replace(/\s*[-]\s*/g, "-")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function pickFirstUsable(values: Array<unknown>): string {
-  for (const value of values) {
-    if (isUsableText(value)) {
-      return value.trim();
-    }
-  }
-
-  return "";
-}
-
-function parseExpiryDate(expiryDate: string): Date | null {
-  const normalized = expiryDate.trim().replace(/\s+/g, " ").toLowerCase();
-
-  const monthNames = [
-    "jan",
-    "feb",
-    "mar",
-    "apr",
-    "may",
-    "jun",
-    "jul",
-    "aug",
-    "sep",
-    "oct",
-    "nov",
-    "dec",
-  ];
-
-  const monthNameMatch = normalized.match(
-    /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s+(\d{4})$/,
-  );
-  if (monthNameMatch) {
-    const monthIndex = monthNames.indexOf(monthNameMatch[1]);
-    const year = parseInt(monthNameMatch[2], 10);
-    if (monthIndex >= 0 && Number.isFinite(year)) {
-      return new Date(year, monthIndex + 1, 0);
-    }
-  }
-
-  const delimiterMatch = normalized.match(
-    /^([0-9]{1,4})[\s\/\-.]([0-9]{1,4})$/,
-  );
-  if (!delimiterMatch) {
-    return null;
-  }
-
-  const first = parseInt(delimiterMatch[1], 10);
-  const second = parseInt(delimiterMatch[2], 10);
-
-  if (!Number.isFinite(first) || !Number.isFinite(second)) {
-    return null;
-  }
-
-  if (delimiterMatch[1].length === 4) {
-    if (second < 1 || second > 12) {
-      return null;
-    }
-    return new Date(first, second, 0);
-  }
-
-  if (first < 1 || first > 12) {
-    return null;
-  }
-
-  const year = delimiterMatch[2].length === 2 ? 2000 + second : second;
-  if (!Number.isFinite(year) || year < 2000 || year > 2100) {
-    return null;
-  }
-
-  return new Date(year, first, 0);
-}
-
-/**
- * Run OCR on a single image using Roboflow Pharma Package Reader workflow
- */
-async function runOCR(
-  base64Image: string,
-  viewName: keyof PackageViews,
-): Promise<OCRPackageDetails> {
-  try {
-    logger.debug(`Running OCR on ${viewName} image...`);
-
-    const response = await axios.post(
-      `${BASE_URL}/infer/workflows/${WORKSPACE}/${OCR_WORKFLOW_ID}`,
-      {
-        api_key: ROBOFLOW_API_KEY,
-        inputs: {
-          image: { type: "base64", value: base64Image },
-          openai_api_key: OPENAI_API_KEY,
-        },
-      },
-      {
-        headers: { "Content-Type": "application/json" },
-        timeout: OCR_TIMEOUT_MS,
-      },
-    );
-
-    const output = response.data.outputs?.[0] as
-      | Record<string, unknown>
-      | undefined;
-
-    if (!output) {
-      logger.warn(`OCR returned no output for ${viewName}`);
-      return {
-        drug_name: "",
-        nafdac_reg_no: "",
-        batch_number: "",
-        expiry_date: "",
-        manufacturer: "",
-        barcode: "",
-      };
-    }
-
-    const extractedText = pickFirstUsable([
-      output.extracted_text,
-      output.text,
-      output.raw_text,
-    ]);
-    const packageDetails = pickFirstUsable([output.package_details]);
-
-    if (extractedText) {
-      logger.debug(`OCR extracted text for ${viewName}:\n${extractedText}`);
-    } else {
-      logger.debug(`OCR extracted text for ${viewName}: <none>`);
-    }
-
-    if (packageDetails) {
-      logger.debug(`OCR package_details for ${viewName}: ${packageDetails}`);
-    } else {
-      logger.warn(`OCR returned no package_details for ${viewName}`);
-    }
-
-    if (!packageDetails) {
-      return {
-        drug_name: "",
-        nafdac_reg_no: extractNafdacNumber(extractedText),
-        batch_number: "",
-        expiry_date: extractExpiryDate(extractedText),
-        manufacturer: "",
-        barcode: "",
-      };
-    }
-
-    const cleanStr = stripMarkdownCodeFences(packageDetails);
-    const parsed = JSON.parse(cleanStr) as OCRPackageDetails;
-    const fallbackExpiry = extractExpiryDate(extractedText);
-    const fallbackNafdac = extractNafdacNumber(extractedText);
-
-    if (!isUsableText(parsed.expiry_date) && fallbackExpiry) {
-      parsed.expiry_date = fallbackExpiry;
-    }
-
-    if (!isUsableText(parsed.nafdac_reg_no) && fallbackNafdac) {
-      parsed.nafdac_reg_no = fallbackNafdac;
-    }
-
-    logger.debug(
-      `OCR result for ${viewName}: drug_name="${parsed.drug_name}", nafdac="${parsed.nafdac_reg_no}", expiry="${parsed.expiry_date}"`,
-    );
-    return parsed;
-  } catch (error) {
-    logger.error(`OCR call failed for ${viewName}: ${error}`);
-    throw error;
-  }
-}
-
-/**
- * Merge 4 OCR results by picking the best non-empty value for each field
- */
-function mergeOCRResults(results: OCRPackageDetails[]): OCRPackageDetails {
-  logger.debug("Merging 4 OCR results...");
-
-  const isUsableValue = (value: unknown): value is string => {
-    if (typeof value !== "string") {
-      return false;
-    }
-
-    const normalized = value.trim().toLowerCase();
-    return (
-      normalized !== "" &&
-      normalized !== "n/a" &&
-      normalized !== "not provided" &&
-      normalized !== "not available" &&
-      normalized !== "unknown"
-    );
-  };
-
-  const normalizeNafdac = (value: string): string => {
-    const trimmed = value.trim();
-    const compact = trimmed.replace(/\s*[-]\s*/g, "-");
-    return compact.replace(/\s+/g, " ");
-  };
-
-  const extractNafdacNumber = (value: unknown): string | null => {
-    if (!isUsableValue(value)) {
-      return null;
-    }
-
-    const normalized = normalizeNafdac(value);
-
-    const exactMatch = normalized.match(/\b\d{2}-\d{4}\b/);
-    if (exactMatch?.[0]) {
-      return exactMatch[0];
-    }
-
-    const spacedMatch = normalized.match(/\b\d{2}\s*-\s*\d{4}\b/);
-    if (spacedMatch?.[0]) {
-      return normalizeNafdac(spacedMatch[0]);
-    }
-
-    return null;
-  };
-
-  const pickNafdac = (): string => {
-    for (const result of results) {
-      const candidate = extractNafdacNumber(result.nafdac_reg_no);
-      if (candidate) {
-        return candidate;
-      }
-    }
-
-    return "";
-  };
-
-  const pickBest = (field: keyof OCRPackageDetails): string => {
-    const candidates = results.map((r) => r[field]).filter(isUsableValue);
-
-    if (candidates.length === 0) return "";
-
-    return candidates.reduce((a, b) => (a.length >= b.length ? a : b));
-  };
-
-  const merged: OCRPackageDetails = {
-    drug_name: pickBest("drug_name"),
-    nafdac_reg_no: pickNafdac(),
-    batch_number: pickBest("batch_number"),
-    expiry_date: pickBest("expiry_date"),
-    manufacturer: pickBest("manufacturer"),
-    barcode: pickBest("barcode"),
-  };
-
-  logger.debug(`Merged result: nafdac="${merged.nafdac_reg_no}"`);
-  return merged;
-}
-
-/**
- * Fetch reference image from Supabase reference-images bucket and convert to base64
- */
-async function fetchRefBase64(
-  nafdac: string,
-  position: string,
-): Promise<string> {
-  try {
-    const path = `${nafdac}_${position}.jpg`;
-    logger.debug(`Fetching reference: ${path}`);
-
-    const { data, error } = await supabase.storage
-      .from("reference-images")
-      .download(path);
-
-    if (error || !data) {
-      logger.error(
-        `Missing reference image: ${path} — ${error?.message || "unknown error"}`,
-      );
-      throw new Error(`Reference image not found: ${path} — ${error?.message}`);
-    }
-
-    const buffer = Buffer.from(await data.arrayBuffer());
-    const base64 = buffer.toString("base64");
-    logger.debug(`Fetched reference (${buffer.length} bytes) → base64`);
-    return base64;
-  } catch (error) {
-    logger.error(`fetchRefBase64 failed: ${error}`);
-    throw error;
-  }
-}
-
-/**
- * Run SIFT verifier on a view pair using Roboflow SIFT workflow
- */
-async function runSIFT(
-  referenceBase64: string,
-  queryBase64: string,
-): Promise<SIFTComparisonResult> {
-  logger.debug("Running SIFT verifier...");
-
-  const payload = {
-    api_key: ROBOFLOW_API_KEY,
-    inputs: {
-      reference_image: { type: "base64", value: referenceBase64 },
-      query_image: { type: "base64", value: queryBase64 },
-    },
-  };
-
-  const maxAttempts = 3;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const response = await axios.post(
-        `${BASE_URL}/infer/workflows/${WORKSPACE}/${SIFT_WORKFLOW_ID}`,
-        payload,
-        {
-          headers: { "Content-Type": "application/json" },
-          timeout: SIFT_TIMEOUT_MS,
-        },
-      );
-
-      const out = response.data.outputs?.[0];
-      if (!out) {
-        logger.warn("SIFT returned empty output");
-        return {
-          match_verdict: false,
-          similarity_score: 0,
-          match_visualization: "",
-        };
-      }
-
-      logger.debug(
-        `SIFT result: verdict=${out.match_verdict}, score=${out.similarity_score}`,
-      );
-
-      return {
-        match_verdict: Boolean(out.match_verdict),
-        similarity_score: Number(out.similarity_score) || 0,
-        match_visualization: String(out.match_visualization || ""),
-      };
-    } catch (attemptError) {
-      const status = axios.isAxiosError(attemptError)
-        ? attemptError.response?.status
-        : undefined;
-      const body = axios.isAxiosError(attemptError)
-        ? attemptError.response?.data
-        : undefined;
-
-      logger.warn(
-        `SIFT attempt ${attempt}/${maxAttempts} failed${status ? ` with status ${status}` : ""}: ${attemptError}`,
-      );
-      if (body) {
-        logger.warn(`SIFT error response body: ${JSON.stringify(body)}`);
-      }
-
-      if (attempt < maxAttempts) {
-        const backoffMs = attempt * 2000;
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        continue;
-      }
-
-      logger.error(`SIFT call failed after ${maxAttempts} attempts`);
-      return {
-        match_verdict: false,
-        similarity_score: 0,
-        match_visualization: "",
-      };
-    }
-  }
+function buildExpiryAnalysis(expiryDate: string) {
+  const expiryValue = isUsableText(expiryDate) ? expiryDate.trim() : "";
+  const parsedExpiry = expiryValue ? parseExpiryDate(expiryValue) : null;
 
   return {
-    match_verdict: false,
-    similarity_score: 0,
-    match_visualization: "",
+    detected: Boolean(expiryValue),
+    expiry_date: expiryValue || null,
+    is_expired: parsedExpiry ? parsedExpiry < new Date() : null,
+    note: !expiryValue
+      ? "Expiry date not detected"
+      : !parsedExpiry
+        ? "Expiry detected but format is not parseable"
+        : parsedExpiry < new Date()
+          ? "Product appears expired"
+          : "Product appears valid",
   };
 }
 
-/**
- * Main orchestrator: Verify drug package across 4 views with automatic panel matching
- *
- * Flow:
- * 1. Run OCR on all 4 views (front, back, panel_1, panel_2) in parallel
- * 2. Merge 4 OCR results intelligently
- * 3. Fetch all 4 reference images from Supabase (front, back, panel_a, panel_b)
- * 4. Run SIFT on front/back directly (unambiguous)
- * 5. Run SIFT on all 4 panel combinations (panel_1 vs a, panel_1 vs b, panel_2 vs a, panel_2 vs b)
- * 6. Use Hungarian-style matching to find best assignment for panels
- * 7. All views must pass for authentic=true
- */
 export async function verifyDrugPackage(
   views: PackageViews,
 ): Promise<VerificationResponse> {
   try {
-    logger.info("Starting 4-view package verification with panel matching...");
+    logger.info("Starting 4-view package verification...");
 
-    // STEP 1: Run OCR on ALL 4 views in parallel
-    logger.debug("Step 1: Running OCR on all 4 views in parallel");
     const ocrResults = await Promise.all([
       runOCR(views.front, "front"),
       runOCR(views.back, "back"),
@@ -509,10 +67,9 @@ export async function verifyDrugPackage(
       panel_2: ocrResults[3],
     };
 
-    // STEP 2: Merge into one best structured reading
-    logger.debug("Step 2: Merging OCR results");
     const mergedOCR = mergeOCRResults(ocrResults);
     const frontOCR = ocrResults[0];
+
     const expiryDate = pickFirstUsable([
       frontOCR.expiry_date,
       ocrResults[1].expiry_date,
@@ -525,23 +82,9 @@ export async function verifyDrugPackage(
     }
 
     mergedOCR.drug_name = frontOCR.drug_name || "";
+
     const nafdacNumber = mergedOCR.nafdac_reg_no;
-    const expiryValue = isUsableText(mergedOCR.expiry_date)
-      ? mergedOCR.expiry_date.trim()
-      : "";
-    const parsedExpiry = expiryValue ? parseExpiryDate(expiryValue) : null;
-    const expiryAnalysis = {
-      detected: Boolean(expiryValue),
-      expiry_date: expiryValue || null,
-      is_expired: parsedExpiry ? parsedExpiry < new Date() : null,
-      note: !expiryValue
-        ? "Expiry date not detected"
-        : !parsedExpiry
-          ? "Expiry detected but format is not parseable"
-          : parsedExpiry < new Date()
-            ? "Product appears expired"
-            : "Product appears valid",
-    };
+    const expiryAnalysis = buildExpiryAnalysis(mergedOCR.expiry_date);
 
     if (!nafdacNumber || nafdacNumber.trim() === "") {
       logger.error("Could not extract NAFDAC number from any view");
@@ -552,27 +95,16 @@ export async function verifyDrugPackage(
 
     logger.info(`Identified NAFDAC: ${nafdacNumber}`);
 
-    // STEP 3: Fetch reference images (FRONT and BACK only - skip panels for speed)
-    logger.debug(
-      "Step 3: Fetching front and back reference images from Supabase",
-    );
     const [refFront, refBack] = await Promise.all([
       fetchRefBase64(nafdacNumber, "front"),
       fetchRefBase64(nafdacNumber, "back"),
     ]);
 
-    logger.debug("Fetched reference images");
-
-    // STEP 4: Run SIFT on FRONT and BACK only
-    logger.debug("Step 4: Running SIFT on front and back");
     const [frontResult, backResult] = await Promise.all([
       runSIFT(refFront, views.front),
       runSIFT(refBack, views.back),
     ]);
 
-    logger.debug("SIFT comparisons complete");
-
-    // STEP 5: Build per-view analysis (front and back only)
     const perViewAnalysis: ViewAnalysis[] = [
       {
         view: "front",
@@ -590,12 +122,11 @@ export async function verifyDrugPackage(
       },
     ];
 
-    // STEP 6: Verify NAFDAC in database
-    logger.debug("Step 6: Verifying NAFDAC number in database");
     let nafdacInfo;
     try {
-      nafdacInfo =
-        await nafdacScraperService.searchNAFDACGreenbook(nafdacNumber);
+      nafdacInfo = await nafdacScraperService.searchNAFDACGreenbook(
+        nafdacNumber,
+      );
     } catch (err) {
       logger.warn(
         `NAFDAC verification failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -603,13 +134,11 @@ export async function verifyDrugPackage(
       nafdacInfo = null;
     }
 
-    // STEP 7: Check authenticity (both front and back must pass)
     const allPassed = frontResult.match_verdict && backResult.match_verdict;
     const lowestScore = Math.min(
       frontResult.similarity_score,
       backResult.similarity_score,
     );
-
     const aggregateSimilarity = Math.round(
       (frontResult.similarity_score + backResult.similarity_score) / 2,
     );
@@ -625,13 +154,8 @@ export async function verifyDrugPackage(
       aggregateSift as any,
     );
 
-    const confPercent = authReport.confidence; // 0-100
-
-    let confidenceBand: "very_high" | "high" | "moderate" | "low";
-    if (confPercent >= 90) confidenceBand = "very_high";
-    else if (confPercent >= 75) confidenceBand = "high";
-    else if (confPercent >= 50) confidenceBand = "moderate";
-    else confidenceBand = "low";
+    const confPercent = authReport.confidence;
+    const confidenceBand = buildConfidenceBand(confPercent);
 
     const verdictReason = allPassed
       ? "Front and back images matched reference panels."
@@ -641,8 +165,6 @@ export async function verifyDrugPackage(
       `Verification complete: authentic=${allPassed}, sift_confidence=${lowestScore}, scoring_confidence=${confPercent}`,
     );
 
-    // STEP 8: Generate detailed analysis using Gemini
-    logger.debug("Step 8: Generating detailed authenticity analysis");
     let detailedAnalysis;
     try {
       detailedAnalysis = await detailedAnalysisService.generateDetailedAnalysis(
@@ -656,8 +178,6 @@ export async function verifyDrugPackage(
       detailedAnalysis = null;
     }
 
-    // STEP 9: Run Gemini vision comparison on FRONT and BACK
-    logger.debug("Step 9: Running Gemini vision comparison on front and back");
     let frontBackComparison;
     if (geminiVisionService.isEnabled()) {
       try {
@@ -665,7 +185,6 @@ export async function verifyDrugPackage(
           refFront,
           views.front,
         );
-        logger.debug("Front image comparison complete");
       } catch (err) {
         logger.warn(
           `Gemini front comparison failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -682,15 +201,14 @@ export async function verifyDrugPackage(
       scoring_confidence: confPercent,
       confidence_band: confidenceBand,
       expiry_analysis: expiryAnalysis,
-      ...(nafdacInfo &&
-        nafdacInfo.found && {
-          nafdac_verification: {
-            found: true,
-            product_name: nafdacInfo.productName,
-            manufacturer: nafdacInfo.manufacturer,
-            status: nafdacInfo.status,
-          },
-        }),
+      ...(nafdacInfo && nafdacInfo.found && {
+        nafdac_verification: {
+          found: true,
+          product_name: nafdacInfo.productName,
+          manufacturer: nafdacInfo.manufacturer,
+          status: nafdacInfo.status,
+        },
+      }),
       ...(frontBackComparison && {
         gemini_front_back_comparison: frontBackComparison,
       }),
@@ -705,7 +223,6 @@ export async function verifyDrugPackage(
       },
     };
 
-    // Compute final verdict based on all factors
     const finalVerdict = verdictService.computeFinalVerdict(responseBody);
     responseBody.final_verdict = finalVerdict;
 
