@@ -58,17 +58,42 @@ class GeminiVisionService {
         return null;
       }
 
-      const prompt = `You are an expert counterfeit detection AI. Analyze these two images carefully.
+      const prompt = `You are a pharmaceutical packaging forensic analyst.
 
-Image 1 is the verified authentic product.
-Image 2 is the product being inspected.
+You are shown two images of the SAME face of a drug package:
+- Image 1: VERIFIED AUTHENTIC reference
+- Image 2: Query to inspect
 
-Perform a side-by-side analysis focusing specifically on:
-1. Typography & Font: Check font thickness, kerning, alignment, and letter shape distortions.
-2. Logo Integrity: Look for subtle modifications in graphic shape, color variance, or positioning.
-3. Color Consistency: Verify color accuracy and saturation levels.
-4. Print Quality: Identify smudging, bleeding, or registration issues.
-5. Overall Design Elements: Spot missing or incorrectly placed design elements.`;
+Your job is to determine if Image 2 is the IDENTICAL packaging face as Image 1, allowing only for normal camera differences (lighting, angle, blur).
+
+Check these EXACT items. For each, output PASS or FAIL with one sentence of evidence:
+
+1. LOGO: Does the query show the exact same logo symbol, proportions, and placement?
+2. MAIN_TEXT: Does the drug name text match exactly in font, size, position, and spelling?
+3. DOSAGE_INFO: Is the dosage/strength text in the same location with identical content?
+4. COLOR_SCHEME: Are the dominant brand colors the same (ignoring only lighting/shadow variations)?
+5. SEALS_MARKS: Are all holograms, security seals, and regulatory marks present and identical?
+6. LAYOUT_GRID: Are all text blocks, borders, and icon positions aligned identically?
+7. TYPOGRAPHY: Is any text misspelled, different font, or differently kerned?
+
+OUTPUT STRICT JSON ONLY:
+{
+  "is_identical": boolean,
+  "confidence": number 0-100,
+  "checks": {
+    "logo": {"pass": boolean, "evidence": "string"},
+    "main_text": {"pass": boolean, "evidence": "string"},
+    "dosage_info": {"pass": boolean, "evidence": "string"},
+    "color_scheme": {"pass": boolean, "evidence": "string"},
+    "seals_marks": {"pass": boolean, "evidence": "string"},
+    "layout_grid": {"pass": boolean, "evidence": "string"},
+    "typography": {"pass": boolean, "evidence": "string"}
+  },
+  "verdict_reason": "One sentence summary"
+}
+
+Rule: is_identical MUST be true ONLY if ALL checks pass. If ANY check fails, is_identical is false.
+`;
 
       const requestBody = {
         contents: [

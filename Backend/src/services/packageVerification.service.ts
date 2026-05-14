@@ -124,9 +124,8 @@ export async function verifyDrugPackage(
 
     let nafdacInfo;
     try {
-      nafdacInfo = await nafdacScraperService.searchNAFDACGreenbook(
-        nafdacNumber,
-      );
+      nafdacInfo =
+        await nafdacScraperService.searchNAFDACGreenbook(nafdacNumber);
     } catch (err) {
       logger.warn(
         `NAFDAC verification failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -201,14 +200,15 @@ export async function verifyDrugPackage(
       scoring_confidence: confPercent,
       confidence_band: confidenceBand,
       expiry_analysis: expiryAnalysis,
-      ...(nafdacInfo && nafdacInfo.found && {
-        nafdac_verification: {
-          found: true,
-          product_name: nafdacInfo.productName,
-          manufacturer: nafdacInfo.manufacturer,
-          status: nafdacInfo.status,
-        },
-      }),
+      ...(nafdacInfo &&
+        nafdacInfo.found && {
+          nafdac_verification: {
+            found: true,
+            product_name: nafdacInfo.productName,
+            manufacturer: nafdacInfo.manufacturer,
+            status: nafdacInfo.status,
+          },
+        }),
       ...(frontBackComparison && {
         gemini_front_back_comparison: frontBackComparison,
       }),
