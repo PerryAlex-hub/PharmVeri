@@ -10,7 +10,7 @@ export default function Home() {
             Verify Products. Build Customer Trust.
           </h1>
           <p className="text-xl md:text-2xl mb-8 text-gray-600 max-w-2xl mx-auto">
-            ScanVerify helps pharmacies and vendors verify products, receive
+            PharmVeri helps pharmacies and vendors verify products, receive
             secure payments, and build credibility with customers.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
@@ -208,7 +208,7 @@ export default function Home() {
           </div>
           <div className="bg-teal-50 p-8 rounded-lg">
             <p className="text-lg text-gray-700">
-              Join thousands of pharmacies across Nigeria who trust ScanVerify
+              Join thousands of pharmacies across Nigeria who trust PharmVeri
               for secure, verified transactions.
             </p>
           </div>
@@ -218,7 +218,7 @@ export default function Home() {
       {/* Final CTA */}
       <section className="py-20 px-6 bg-teal-600 text-white">
         <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-4xl font-bold mb-4">Join ScanVerify Today</h2>
+          <h2 className="text-4xl font-bold mb-4">Join PharmVeri Today</h2>
           <p className="text-xl mb-8">
             Start building customer trust and secure payments for your pharmacy.
           </p>
@@ -241,7 +241,7 @@ export default function Home() {
         <div className="max-w-6xl mx-auto">
           <div className="grid md:grid-cols-4 gap-8">
             <div>
-              <h3 className="font-bold mb-4">ScanVerify</h3>
+              <h3 className="font-bold mb-4">PharmVeri</h3>
               <p className="text-gray-400">
                 Building trust in healthcare through verification.
               </p>
@@ -268,7 +268,7 @@ export default function Home() {
             </div>
             <div>
               <h4 className="font-semibold mb-4">Contact</h4>
-              <p className="text-gray-400">support@scanverify.com</p>
+              <p className="text-gray-400">support@pharmveri.com</p>
               <p className="text-gray-400">+234 123 456 7890</p>
             </div>
             <div>
@@ -278,10 +278,14 @@ export default function Home() {
                   href="https://linkedin.com"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-blue-600 transition-colors"
+                  className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-teal-600 transition-colors"
                   aria-label="LinkedIn"
                 >
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    className="w-5 h-5 text-white"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
                     <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.32 1.39v-1.2h-2.84v8.37h2.84v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.84M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z" />
                   </svg>
                 </a>
@@ -289,10 +293,14 @@ export default function Home() {
                   href="https://instagram.com"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-pink-600 transition-colors"
+                  className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-teal-600 transition-colors"
                   aria-label="Instagram"
                 >
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    className="w-5 h-5 text-white"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
                     <path d="M7.8 2h8.4C19.4 2 22 4.6 22 7.8v8.4c0 3.2-2.6 5.8-5.8 5.8H7.8C4.6 22 2 19.4 2 16.2V7.8C2 4.6 4.6 2 7.8 2m-.3 2c-2.1 0-3.8 1.7-3.8 3.8v8.4c0 2.1 1.7 3.8 3.8 3.8h8.4c2.1 0 3.8-1.7 3.8-3.8V7.8c0-2.1-1.7-3.8-3.8-3.8H7.5m9.6 1.5a1.5 1.5 0 0 1 0 3a1.5 1.5 0 0 1 0-3m-5.1 1.5c2.5 0 4.5 2 4.5 4.5s-2 4.5-4.5 4.5s-4.5-2-4.5-4.5s2-4.5 4.5-4.5m0 2c-1.4 0-2.5 1.1-2.5 2.5s1.1 2.5 2.5 2.5s2.5-1.1 2.5-2.5s-1.1-2.5-2.5-2.5z" />
                   </svg>
                 </a>
@@ -300,10 +308,14 @@ export default function Home() {
                   href="https://x.com"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-600 transition-colors"
+                  className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-teal-600 transition-colors"
                   aria-label="X (formerly Twitter)"
                 >
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    className="w-5 h-5 text-white"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
                     <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.637l-5.1-6.693-5.856 6.693H2.556l7.73-8.835L1.75 2.25h6.837l4.557 6.283 5.364-6.283zM17.15 18.75h1.828L5.293 4.045H3.556l13.594 14.705z" />
                   </svg>
                 </a>
@@ -311,7 +323,7 @@ export default function Home() {
             </div>
           </div>
           <div className="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
-            <p>&copy; 2024 ScanVerify. All rights reserved.</p>
+            <p>&copy; 2026 PharmVeri. All rights reserved.</p>
           </div>
         </div>
       </footer>
